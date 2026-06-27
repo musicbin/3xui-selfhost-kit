@@ -154,6 +154,7 @@ write_vless_reality() {
   jq -n \
     --arg remark "$remark" \
     --argjson port "${REALITY_PORT:-443}" \
+    --arg shareAddr "${SERVER_ADDR:-}" \
     --arg uuid "$uuid" \
     --arg subId "$sub_id" \
     --arg target "${REALITY_TARGET:-www.cloudflare.com:443}" \
@@ -167,6 +168,8 @@ write_vless_reality() {
       remark: $remark,
       listen: "",
       port: $port,
+      shareAddr: $shareAddr,
+      shareAddrStrategy: (if $shareAddr == "" then "listen" else "custom" end),
       protocol: "vless",
       expiryTime: 0,
       total: 0,
@@ -257,6 +260,7 @@ write_hysteria2_optional() {
   jq -n \
     --arg remark "$remark" \
     --argjson port "${HYSTERIA_PORT:-8443}" \
+    --arg shareAddr "${SERVER_ADDR:-}" \
     --arg auth "$auth" \
     --arg subId "$sub_id" \
     --arg certFile "$cert_file" \
@@ -267,6 +271,8 @@ write_hysteria2_optional() {
       remark: $remark,
       listen: "",
       port: $port,
+      shareAddr: $shareAddr,
+      shareAddrStrategy: (if $shareAddr == "" then "listen" else "custom" end),
       protocol: "hysteria",
       expiryTime: 0,
       total: 0,
@@ -358,6 +364,7 @@ write_trojan_optional() {
   jq -n \
     --arg remark "$remark" \
     --argjson port "${TROJAN_PORT:-9443}" \
+    --arg shareAddr "${SERVER_ADDR:-}" \
     --arg password "$password" \
     --arg subId "$sub_id" \
     --arg certFile "$cert_file" \
@@ -368,6 +375,8 @@ write_trojan_optional() {
       remark: $remark,
       listen: "",
       port: $port,
+      shareAddr: $shareAddr,
+      shareAddrStrategy: (if $shareAddr == "" then "listen" else "custom" end),
       protocol: "trojan",
       expiryTime: 0,
       total: 0,
@@ -442,6 +451,7 @@ write_shadowsocks_optional() {
   jq -n \
     --arg remark "$remark" \
     --argjson port "${SHADOWSOCKS_PORT:-8388}" \
+    --arg shareAddr "${SERVER_ADDR:-}" \
     --arg serverPassword "$server_password" \
     --arg clientPassword "$client_password" \
     --arg subId "$sub_id" \
@@ -450,6 +460,8 @@ write_shadowsocks_optional() {
       remark: $remark,
       listen: "",
       port: $port,
+      shareAddr: $shareAddr,
+      shareAddrStrategy: (if $shareAddr == "" then "listen" else "custom" end),
       protocol: "shadowsocks",
       expiryTime: 0,
       total: 0,
@@ -549,6 +561,10 @@ write_trojan_optional
 write_shadowsocks_optional
 apply_chain_optional
 
+api_get "/panel/api/inbounds/allLinks" | jq -r '.obj[]?' > runtime/panel-all-links.txt || true
+chmod 600 runtime/panel-all-links.txt 2>/dev/null || true
+
 api_post_form "/panel/api/server/restartXrayService" | jq . || true
 chmod 600 runtime/client-links.txt
 echo "Client links saved to runtime/client-links.txt"
+echo "Panel-rendered links saved to runtime/panel-all-links.txt"

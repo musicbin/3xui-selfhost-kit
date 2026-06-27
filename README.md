@@ -54,7 +54,10 @@ http://127.0.0.1:2053/随机路径/
 
 ```bash
 sudo cat /opt/3xui-selfhost-kit/runtime/client-links.txt
+sudo cat /opt/3xui-selfhost-kit/runtime/panel-all-links.txt
 ```
+
+`client-links.txt` 是脚本生成的主线路链接；`panel-all-links.txt` 是 3x-ui 面板自己的 `allLinks` 接口导出的全部协议链接。
 
 ## 可选协议
 
@@ -143,4 +146,3 @@ sudo ./scripts/manage.sh apply-presets
 - `8388/tcp,udp`：Shadowsocks 2022，可选
 
 请只在合法授权的网络和用途下使用。
-
