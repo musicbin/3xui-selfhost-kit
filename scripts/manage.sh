@@ -31,6 +31,7 @@ usage() {
 Usage: ./scripts/manage.sh <command>
 
 Commands:
+  menu           Open terminal menu panel
   status         Show container status and panel URL hint
   logs           Tail 3x-ui logs
   update         Pull latest official image and restart
@@ -44,6 +45,9 @@ EOF
 cmd="${1:-}"
 
 case "$cmd" in
+  menu)
+    ./scripts/menu.sh
+    ;;
   status)
     docker compose ps
     echo

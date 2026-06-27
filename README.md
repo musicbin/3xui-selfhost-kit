@@ -43,11 +43,14 @@ sudo cat /opt/3xui-selfhost-kit/runtime/client-links.txt
 - VLESS REALITY 默认配置方式和端口
 - 客户端链接文件位置
 - Hysteria2、Trojan、Shadowsocks、链式代理的启用命令
+- 类似 x-ui-yg 的终端菜单面板，并创建快捷命令 `3xui-kit`
 
 之后想重新显示这些信息：
 
 ```bash
+sudo 3xui-kit
 cd /opt/3xui-selfhost-kit
+sudo ./scripts/manage.sh menu
 sudo ./scripts/manage.sh status
 sudo ./scripts/manage.sh links
 ```
@@ -156,6 +159,7 @@ docker compose up -d 3xui
 ```bash
 cd /opt/3xui-selfhost-kit
 sudo ./scripts/manage.sh status
+sudo ./scripts/manage.sh menu
 sudo ./scripts/manage.sh logs
 sudo ./scripts/manage.sh backup
 sudo ./scripts/manage.sh links

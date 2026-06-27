@@ -1,0 +1,393 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  TARGET="$(readlink "$SOURCE")"
+  if [[ "$TARGET" == /* ]]; then
+    SOURCE="$TARGET"
+  else
+    SOURCE="$DIR/$TARGET"
+  fi
+done
+ROOT_DIR="$(cd "$(dirname "$SOURCE")/.." && pwd)"
+cd "$ROOT_DIR"
+
+if [ -f .env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . ./.env
+  set +a
+fi
+
+XUI_CONTAINER="${XUI_CONTAINER:-3xui}"
+PANEL_PORT="${PANEL_PORT:-2053}"
+PANEL_LISTEN_IP="${PANEL_LISTEN_IP:-127.0.0.1}"
+WEB_BASE_PATH="${WEB_BASE_PATH:-panel}"
+SERVER_ADDR="${SERVER_ADDR:-your-server}"
+REALITY_PORT="${REALITY_PORT:-443}"
+REALITY_TARGET="${REALITY_TARGET:-www.cloudflare.com:443}"
+REALITY_SERVER_NAMES="${REALITY_SERVER_NAMES:-www.cloudflare.com,cloudflare.com}"
+
+green=$'\033[0;32m'
+cyan=$'\033[0;36m'
+yellow=$'\033[1;33m'
+blue=$'\033[0;34m'
+red=$'\033[0;31m'
+plain=$'\033[0m'
+
+line() {
+  printf '%s\n' "${green}--------------------------------------------------------------------------------${plain}"
+}
+
+warn_line() {
+  printf '%s\n' "${red}~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~${plain}"
+}
+
+pause() {
+  echo
+  read -r -p "按回车键返回菜单..." _ </dev/tty || true
+}
+
+need_root_hint() {
+  if [ "$(id -u)" -ne 0 ]; then
+    echo "${yellow}提示：部分 Docker/面板操作需要 sudo。建议使用：sudo 3xui-kit${plain}"
+  fi
+}
+
+os_name() {
+  if [ -r /etc/os-release ]; then
+    . /etc/os-release
+    printf '%s' "${PRETTY_NAME:-Linux}"
+  else
+    uname -s
+  fi
+}
+
+virt_name() {
+  if command -v systemd-detect-virt >/dev/null 2>&1; then
+    systemd-detect-virt 2>/dev/null || printf 'unknown'
+  else
+    printf 'unknown'
+  fi
+}
+
+bbr_name() {
+  sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || printf 'unknown'
+}
+
+local_ips() {
+  hostname -I 2>/dev/null | awk '{$1=$1; print}' || true
+}
+
+container_state() {
+  docker inspect -f '{{.State.Status}}' "$XUI_CONTAINER" 2>/dev/null || printf 'not-found'
+}
+
+container_health() {
+  local state
+  state="$(container_state)"
+  case "$state" in
+    running) printf '%s已运行%s' "$cyan" "$plain" ;;
+    exited|dead) printf '%s未运行%s' "$red" "$plain" ;;
+    not-found) printf '%s未安装/未找到%s' "$yellow" "$plain" ;;
+    *) printf '%s%s%s' "$yellow" "$state" "$plain" ;;
+  esac
+}
+
+panel_url() {
+  if [ "$PANEL_LISTEN_IP" = "127.0.0.1" ] || [ "$PANEL_LISTEN_IP" = "localhost" ]; then
+    printf 'http://127.0.0.1:%s/%s/' "$PANEL_PORT" "${WEB_BASE_PATH#/}"
+  else
+    printf 'http://%s:%s/%s/' "$SERVER_ADDR" "$PANEL_PORT" "${WEB_BASE_PATH#/}"
+  fi
+}
+
+tunnel_cmd() {
+  printf 'ssh -L %s:127.0.0.1:%s root@%s' "$PANEL_PORT" "$PANEL_PORT" "$SERVER_ADDR"
+}
+
+refresh_env() {
+  if [ -f .env ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . ./.env
+    set +a
+  fi
+}
+
+set_env_var() {
+  local key="$1"
+  local value="$2"
+  local tmp
+  tmp="$(mktemp)"
+  if [ -f .env ]; then
+    awk -v k="$key" -v v="$value" '
+      BEGIN { done = 0 }
+      $0 ~ "^" k "=" { print k "=" v; done = 1; next }
+      { print }
+      END { if (!done) print k "=" v }
+    ' .env > "$tmp"
+  else
+    printf '%s=%s\n' "$key" "$value" > "$tmp"
+  fi
+  mv "$tmp" .env
+  chmod 600 .env
+}
+
+write_runtime_summary() {
+  mkdir -p runtime
+  chmod 700 runtime
+  cat > runtime/install-summary.txt <<EOF
+3x-ui self-host kit installed.
+
+1) Install dir
+  ${ROOT_DIR}
+
+2) Visual panel
+  Panel bind: ${PANEL_LISTEN_IP}:${PANEL_PORT}
+  Panel path: /${WEB_BASE_PATH}/
+  Username:   ${PANEL_USERNAME:-unknown}
+  Password:   ${PANEL_PASSWORD:-unknown}
+
+3) How to open the panel
+  Recommended SSH tunnel:
+    $(tunnel_cmd)
+
+  Then open in your browser:
+    http://127.0.0.1:${PANEL_PORT}/${WEB_BASE_PATH}/
+
+  Direct URL when PANEL_LISTEN_IP is public:
+    http://${SERVER_ADDR}:${PANEL_PORT}/${WEB_BASE_PATH}/
+
+4) Client config links
+  ${ROOT_DIR}/runtime/client-links.txt
+  ${ROOT_DIR}/runtime/panel-all-links.txt
+
+5) Default protocol
+  VLESS + TCP/Raw + XTLS Vision + REALITY
+  Port: ${REALITY_PORT}
+  Reality target: ${REALITY_TARGET}
+  Reality server names: ${REALITY_SERVER_NAMES}
+EOF
+  chmod 600 runtime/install-summary.txt
+}
+
+show_header() {
+  clear 2>/dev/null || true
+  warn_line
+  echo "${cyan}3x-ui 自用部署管理脚本${plain}    快捷方式：${yellow}3xui-kit${plain}"
+  warn_line
+  echo "${green} 1. 一键安装 / 启动 3x-ui 官方镜像${plain}"
+  echo "${green} 2. 删除卸载 3x-ui${plain}"
+  line
+  echo "${green} 3. 查看面板账号、路径、客户端配置链接${plain}"
+  echo "${green} 4. 修改面板设置【用户名密码、登录端口、根路径、监听IP】${plain}"
+  echo "${green} 5. 套用协议预设【VLESS Reality、Hysteria2、Trojan、SS、链式代理】${plain}"
+  echo "${green} 6. 启动、停止、重启 3x-ui${plain}"
+  echo "${green} 7. 更新官方 3x-ui 镜像并重启${plain}"
+  echo "${green} 8. 备份数据库和 .env 配置${plain}"
+  echo "${green} 9. 查看 3x-ui 日志${plain}"
+  echo "${green}10. 启动 / 更新 80 端口伪装静态站点${plain}"
+  echo "${green}11. 刷新并显示节点链接${plain}"
+  echo "${green}12. 显示使用说明和安全建议${plain}"
+  line
+  echo "${green} 0. 退出脚本${plain}"
+  warn_line
+}
+
+show_status() {
+  echo "${green}VPS状态如下:${plain}"
+  echo "系统: ${cyan}$(os_name)${plain}  内核: ${cyan}$(uname -r)${plain}  处理器: ${cyan}$(uname -m)${plain}  虚拟化: ${cyan}$(virt_name)${plain}  BBR算法: ${cyan}$(bbr_name)${plain}"
+  echo "本地IP地址: ${blue}$(local_ips)${plain}"
+  echo "服务器地址: ${blue}${SERVER_ADDR}${plain}"
+  line
+  echo "3x-ui容器状态: $(container_health)"
+  echo "面板监听: ${cyan}${PANEL_LISTEN_IP}:${PANEL_PORT}${plain}"
+  echo "面板路径: ${cyan}/${WEB_BASE_PATH}/ ${plain}"
+  echo "面板地址: ${blue}$(panel_url)${plain}"
+  if [ "$PANEL_LISTEN_IP" = "127.0.0.1" ] || [ "$PANEL_LISTEN_IP" = "localhost" ]; then
+    echo "SSH隧道: ${yellow}$(tunnel_cmd)${plain}"
+  fi
+  line
+  echo "x-ui登录信息如下:"
+  echo "登录用户名: ${blue}${PANEL_USERNAME:-unknown}${plain}"
+  echo "登录密码: ${blue}${PANEL_PASSWORD:-unknown}${plain}"
+  echo "登录端口: ${blue}${PANEL_PORT}${plain}"
+  echo "根路径: ${blue}/${WEB_BASE_PATH}/ ${plain}"
+  line
+  echo "默认协议: ${cyan}VLESS + TCP/Raw + XTLS Vision + REALITY${plain}"
+  echo "REALITY端口: ${blue}${REALITY_PORT}${plain}"
+  echo "REALITY目标: ${blue}${REALITY_TARGET}${plain}"
+  echo "客户端链接: ${blue}${ROOT_DIR}/runtime/client-links.txt${plain}"
+  echo "面板导出链接: ${blue}${ROOT_DIR}/runtime/panel-all-links.txt${plain}"
+}
+
+show_menu() {
+  show_header
+  need_root_hint
+  show_status
+  warn_line
+}
+
+install_or_start() {
+  if [ -z "${PANEL_USERNAME:-}" ]; then
+    PANEL_USERNAME="admin"
+    set_env_var PANEL_USERNAME "$PANEL_USERNAME"
+  fi
+  if [ -z "${PANEL_PASSWORD:-}" ]; then
+    PANEL_PASSWORD="$(openssl rand -base64 24 | tr -d '\n' | tr '/+' 'Aa')"
+    set_env_var PANEL_PASSWORD "$PANEL_PASSWORD"
+  fi
+  docker compose pull 3xui
+  docker compose up -d 3xui
+  docker exec "$XUI_CONTAINER" /app/x-ui setting \
+    -port "$PANEL_PORT" \
+    -listenIP "$PANEL_LISTEN_IP" \
+    -username "$PANEL_USERNAME" \
+    -password "$PANEL_PASSWORD" \
+    -webBasePath "${WEB_BASE_PATH#/}" >/dev/null || true
+  docker restart "$XUI_CONTAINER" >/dev/null || true
+  write_runtime_summary
+  echo "${cyan}3x-ui 已安装/启动。${plain}"
+}
+
+uninstall_xui() {
+  echo "${yellow}将停止并删除容器。默认保留 data/ 数据。${plain}"
+  read -r -p "确认卸载容器？输入 y 确认: " yn </dev/tty || yn=""
+  [ "$yn" = "y" ] || return 0
+  docker compose down
+  read -r -p "是否同时删除 data/ runtime/ backups/？输入 DELETE 确认: " wipe </dev/tty || wipe=""
+  if [ "$wipe" = "DELETE" ]; then
+    rm -rf data runtime backups
+    echo "${red}数据已删除。${plain}"
+  else
+    echo "${cyan}容器已删除，数据已保留。${plain}"
+  fi
+}
+
+show_links() {
+  ./scripts/manage.sh links
+}
+
+change_panel_settings() {
+  local new_user new_pass new_port new_path new_listen
+  echo "${cyan}留空表示保留当前值。${plain}"
+  read -r -p "用户名 [${PANEL_USERNAME:-admin}]: " new_user </dev/tty || true
+  read -r -p "密码 [保留当前密码]: " new_pass </dev/tty || true
+  read -r -p "面板端口 [${PANEL_PORT}]: " new_port </dev/tty || true
+  read -r -p "根路径，不带 / [${WEB_BASE_PATH#/}]: " new_path </dev/tty || true
+  read -r -p "监听IP，127.0.0.1最安全 [${PANEL_LISTEN_IP}]: " new_listen </dev/tty || true
+
+  new_user="${new_user:-${PANEL_USERNAME:-admin}}"
+  new_pass="${new_pass:-${PANEL_PASSWORD:-}}"
+  new_port="${new_port:-$PANEL_PORT}"
+  new_path="${new_path:-${WEB_BASE_PATH#/}}"
+  new_listen="${new_listen:-$PANEL_LISTEN_IP}"
+
+  set_env_var PANEL_USERNAME "$new_user"
+  [ -n "$new_pass" ] && set_env_var PANEL_PASSWORD "$new_pass"
+  set_env_var PANEL_PORT "$new_port"
+  set_env_var WEB_BASE_PATH "${new_path#/}"
+  set_env_var PANEL_LISTEN_IP "$new_listen"
+  refresh_env
+
+  docker exec "$XUI_CONTAINER" /app/x-ui setting \
+    -port "$PANEL_PORT" \
+    -listenIP "$PANEL_LISTEN_IP" \
+    -username "$PANEL_USERNAME" \
+    -password "${PANEL_PASSWORD:-}" \
+    -webBasePath "${WEB_BASE_PATH#/}" >/dev/null
+  docker restart "$XUI_CONTAINER" >/dev/null
+  write_runtime_summary
+  echo "${cyan}面板设置已更新。${plain}"
+}
+
+protocol_presets_menu() {
+  echo "${cyan}协议预设${plain}"
+  echo "1. 只套用默认 VLESS Reality"
+  echo "2. 启用 Hysteria2"
+  echo "3. 启用 Trojan WS TLS"
+  echo "4. 启用 Shadowsocks 2022"
+  echo "5. 配置链式代理出口"
+  echo "0. 返回"
+  read -r -p "请选择: " c </dev/tty || c=""
+  case "$c" in
+    1) ./scripts/apply-presets.sh ;;
+    2) ENABLE_HYSTERIA=1 ./scripts/apply-presets.sh ;;
+    3) ENABLE_TROJAN=1 ./scripts/apply-presets.sh ;;
+    4) ENABLE_SHADOWSOCKS=1 ./scripts/apply-presets.sh ;;
+    5)
+      read -r -p "上游类型 socks/http [socks]: " ct </dev/tty || ct=""
+      read -r -p "上游地址: " ca </dev/tty || ca=""
+      read -r -p "上游端口: " cp </dev/tty || cp=""
+      read -r -p "路由模式 manual/all [manual]: " cm </dev/tty || cm=""
+      CHAIN_ENABLED=1 CHAIN_TYPE="${ct:-socks}" CHAIN_ADDRESS="$ca" CHAIN_PORT="$cp" CHAIN_MODE="${cm:-manual}" ./scripts/apply-presets.sh
+      ;;
+    *) return 0 ;;
+  esac
+}
+
+service_menu() {
+  echo "1. 启动"
+  echo "2. 停止"
+  echo "3. 重启"
+  echo "0. 返回"
+  read -r -p "请选择: " c </dev/tty || c=""
+  case "$c" in
+    1) docker compose up -d 3xui ;;
+    2) docker compose stop 3xui ;;
+    3) docker compose restart 3xui ;;
+    *) return 0 ;;
+  esac
+}
+
+show_help() {
+  cat <<EOF
+常用命令:
+  3xui-kit
+  cd ${ROOT_DIR}
+  ./scripts/manage.sh status
+  ./scripts/manage.sh links
+  ./scripts/manage.sh update
+  ./scripts/manage.sh backup
+
+安全建议:
+  1. 面板默认绑定 127.0.0.1，通过 SSH 隧道访问。
+  2. 公网只开放 ${REALITY_PORT}/tcp 给 VLESS REALITY。
+  3. 不要把 .env、install-summary.txt、订阅链接发给别人。
+  4. Trojan/Hysteria2 建议使用真实可信 TLS 证书。
+EOF
+}
+
+main_loop() {
+  while true; do
+    refresh_env
+    show_menu
+    read -r -p "请输入选项 [0-12]: " choice </dev/tty || choice="0"
+    case "$choice" in
+      1) install_or_start; pause ;;
+      2) uninstall_xui; pause ;;
+      3) show_status; show_links; pause ;;
+      4) change_panel_settings; pause ;;
+      5) protocol_presets_menu; pause ;;
+      6) service_menu; pause ;;
+      7) ./scripts/manage.sh update; pause ;;
+      8) ./scripts/manage.sh backup; pause ;;
+      9) docker compose logs --tail=200 3xui; pause ;;
+      10) docker compose --profile site up -d caddy-site; pause ;;
+      11) ./scripts/apply-presets.sh; show_links; pause ;;
+      12) show_help; pause ;;
+      0) exit 0 ;;
+      *) echo "${yellow}无效选项。${plain}"; pause ;;
+    esac
+  done
+}
+
+if [ "${1:-}" = "--print" ]; then
+  show_menu
+  exit 0
+fi
+
+main_loop

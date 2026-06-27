@@ -14,4 +14,4 @@ jobs:
           bash -n install.sh
           bash -n scripts/manage.sh
           bash -n scripts/apply-presets.sh
-
+          bash -n scripts/menu.sh

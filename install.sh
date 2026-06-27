@@ -86,6 +86,7 @@ download_project() {
     "compose.yaml"
     "scripts/manage.sh"
     "scripts/apply-presets.sh"
+    "scripts/menu.sh"
     "caddy/Caddyfile"
     "site/index.html"
     "README.md"
@@ -97,6 +98,12 @@ download_project() {
   done
 
   chmod +x "${INSTALL_DIR}/scripts/"*.sh
+}
+
+install_cli_shortcut() {
+  mkdir -p /usr/local/bin
+  ln -sf "${INSTALL_DIR}/scripts/menu.sh" /usr/local/bin/3xui-kit
+  chmod +x "${INSTALL_DIR}/scripts/menu.sh"
 }
 
 public_ip() {
@@ -392,6 +399,8 @@ write_install_summary() {
 
 7) Manage
   cd ${INSTALL_DIR}
+  3xui-kit
+  ./scripts/manage.sh menu
   ./scripts/manage.sh status
   ./scripts/manage.sh update
   ./scripts/manage.sh backup
@@ -427,6 +436,7 @@ main() {
   run_config_wizard
   ensure_docker
   download_project
+  install_cli_shortcut
   write_env
   compose_up
   load_env
@@ -443,6 +453,10 @@ main() {
 
   write_install_summary
   print_install_summary
+  if [ "${MENU_AFTER_INSTALL:-1}" = "1" ] && tty_available; then
+    log "Opening terminal menu. You can run it later with: 3xui-kit"
+    "${INSTALL_DIR}/scripts/menu.sh"
+  fi
 }
 
 main "$@"
