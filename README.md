@@ -27,6 +27,23 @@ sudo cat /opt/3xui-selfhost-kit/runtime/install-summary.txt
 sudo cat /opt/3xui-selfhost-kit/runtime/client-links.txt
 ```
 
+安装脚本结束时会直接在命令行打印这些信息：
+
+- 可视化面板监听地址、随机路径、用户名、密码
+- SSH 隧道打开面板的命令
+- 浏览器访问地址
+- VLESS REALITY 默认配置方式和端口
+- 客户端链接文件位置
+- Hysteria2、Trojan、Shadowsocks、链式代理的启用命令
+
+之后想重新显示这些信息：
+
+```bash
+cd /opt/3xui-selfhost-kit
+sudo ./scripts/manage.sh status
+sudo ./scripts/manage.sh links
+```
+
 ## 打开面板
 
 默认面板只监听服务器本机 `127.0.0.1:2053`，公网扫不到。用 SSH 隧道打开：

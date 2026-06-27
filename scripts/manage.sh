@@ -47,9 +47,19 @@ case "$cmd" in
   status)
     docker compose ps
     echo
-    echo "Panel tunnel:"
-    echo "  ssh -L ${PANEL_PORT:-2053}:127.0.0.1:${PANEL_PORT:-2053} root@${SERVER_ADDR:-your-server}"
-    echo "  http://127.0.0.1:${PANEL_PORT:-2053}/${WEB_BASE_PATH:-panel}/"
+    if [ -f runtime/install-summary.txt ]; then
+      cat runtime/install-summary.txt
+    else
+      echo "Visual panel:"
+      echo "  Bind:      ${PANEL_LISTEN_IP:-127.0.0.1}:${PANEL_PORT:-2053}"
+      echo "  Path:      /${WEB_BASE_PATH:-panel}/"
+      echo "  Username:  ${PANEL_USERNAME:-unknown}"
+      echo "  Password:  ${PANEL_PASSWORD:-unknown}"
+      echo
+      echo "Open through SSH tunnel:"
+      echo "  ssh -L ${PANEL_PORT:-2053}:127.0.0.1:${PANEL_PORT:-2053} root@${SERVER_ADDR:-your-server}"
+      echo "  http://127.0.0.1:${PANEL_PORT:-2053}/${WEB_BASE_PATH:-panel}/"
+    fi
     ;;
   logs)
     docker compose logs -f --tail=200 3xui
@@ -75,10 +85,22 @@ case "$cmd" in
     ./scripts/apply-presets.sh
     ;;
   links)
+    if [ -f runtime/install-summary.txt ]; then
+      echo "Config files:"
+      echo "  runtime/client-links.txt"
+      echo "  runtime/panel-all-links.txt"
+      echo
+    fi
     if [ -f runtime/client-links.txt ]; then
+      echo "Script-generated links:"
       cat runtime/client-links.txt
     else
       echo "No generated links yet. Run: ./scripts/manage.sh apply-presets"
+    fi
+    if [ -s runtime/panel-all-links.txt ]; then
+      echo
+      echo "Panel-rendered links:"
+      cat runtime/panel-all-links.txt
     fi
     ;;
   token)

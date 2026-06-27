@@ -196,37 +196,99 @@ configure_panel() {
 write_install_summary() {
   load_env
   local summary="${INSTALL_DIR}/runtime/install-summary.txt"
+  local public_panel_url="http://${SERVER_ADDR:-your-server}:${PANEL_PORT:-2053}/${WEB_BASE_PATH:-panel}/"
+  local tunnel_cmd="ssh -L ${PANEL_PORT:-2053}:127.0.0.1:${PANEL_PORT:-2053} root@${SERVER_ADDR:-your-server}"
+  local local_panel_url="http://127.0.0.1:${PANEL_PORT:-2053}/${WEB_BASE_PATH:-panel}/"
   mkdir -p "${INSTALL_DIR}/runtime"
   chmod 700 "${INSTALL_DIR}/runtime"
   cat > "$summary" <<EOF
 3x-ui self-host kit installed.
 
-Install dir:
+1) Install dir
   ${INSTALL_DIR}
 
-Panel is bound to:
-  ${PANEL_LISTEN_IP}:${PANEL_PORT}
+2) Visual panel
+  Panel bind: ${PANEL_LISTEN_IP:-127.0.0.1}:${PANEL_PORT:-2053}
+  Panel path: /${WEB_BASE_PATH:-panel}/
+  Username:   ${PANEL_USERNAME:-unknown}
+  Password:   ${PANEL_PASSWORD:-unknown}
 
-If PANEL_LISTEN_IP is 127.0.0.1, open it through SSH:
-  ssh -L ${PANEL_PORT}:127.0.0.1:${PANEL_PORT} root@${SERVER_ADDR:-your-server}
-  http://127.0.0.1:${PANEL_PORT}/${WEB_BASE_PATH}/
+3) How to open the panel
+  Recommended SSH tunnel:
+    ${tunnel_cmd}
 
-Panel username:
-  ${PANEL_USERNAME}
+  Then open in your browser:
+    ${local_panel_url}
 
-Panel password:
-  ${PANEL_PASSWORD}
+  If you intentionally set PANEL_LISTEN_IP=0.0.0.0, the direct URL is:
+    ${public_panel_url}
 
-Client links, if presets were applied:
-  ${INSTALL_DIR}/runtime/client-links.txt
+4) Client config links
+  Script-generated main links:
+    ${INSTALL_DIR}/runtime/client-links.txt
 
-Manage:
+  3x-ui panel-rendered links:
+    ${INSTALL_DIR}/runtime/panel-all-links.txt
+
+  Print them:
+    cd ${INSTALL_DIR}
+    ./scripts/manage.sh links
+
+5) Default protocol
+  VLESS + TCP/Raw + XTLS Vision + REALITY
+  Port: ${REALITY_PORT:-443}
+  Reality target: ${REALITY_TARGET:-www.cloudflare.com:443}
+  Reality server names: ${REALITY_SERVER_NAMES:-www.cloudflare.com,cloudflare.com}
+
+6) Configure from command line
+  Edit environment:
+    nano ${INSTALL_DIR}/.env
+
+  Re-apply protocol presets:
+    cd ${INSTALL_DIR}
+    ./scripts/manage.sh apply-presets
+
+  Enable Hysteria2 with a real cert:
+    TLS_CERT_FILE=/root/cert/fullchain.pem TLS_KEY_FILE=/root/cert/privkey.pem ENABLE_HYSTERIA=1 ./scripts/apply-presets.sh
+
+  Enable Trojan WS TLS with a real cert:
+    TLS_CERT_FILE=/root/cert/fullchain.pem TLS_KEY_FILE=/root/cert/privkey.pem ENABLE_TROJAN=1 ./scripts/apply-presets.sh
+
+  Enable Shadowsocks 2022:
+    ENABLE_SHADOWSOCKS=1 ./scripts/apply-presets.sh
+
+  Add a chain proxy outbound and route all traffic through it:
+    CHAIN_ENABLED=1 CHAIN_MODE=all CHAIN_TYPE=socks CHAIN_ADDRESS=1.2.3.4 CHAIN_PORT=1080 ./scripts/apply-presets.sh
+
+7) Manage
   cd ${INSTALL_DIR}
   ./scripts/manage.sh status
   ./scripts/manage.sh update
   ./scripts/manage.sh backup
+
+8) Firewall reminder
+  Public: open ${REALITY_PORT:-443}/tcp for VLESS REALITY.
+  Private: keep ${PANEL_PORT:-2053}/tcp closed to public internet when PANEL_LISTEN_IP=127.0.0.1.
 EOF
   chmod 600 "$summary"
+}
+
+print_install_summary() {
+  load_env
+  local summary="${INSTALL_DIR}/runtime/install-summary.txt"
+  echo
+  echo "============================================================"
+  echo "  3x-ui deployment complete"
+  echo "============================================================"
+  cat "$summary"
+  echo
+  echo "Generated links:"
+  if [ -s "${INSTALL_DIR}/runtime/client-links.txt" ]; then
+    sed -n '1,120p' "${INSTALL_DIR}/runtime/client-links.txt"
+  else
+    echo "  No client links generated yet."
+  fi
+  echo "============================================================"
 }
 
 main() {
@@ -246,8 +308,7 @@ main() {
   fi
 
   write_install_summary
-  log "Done. Summary: ${INSTALL_DIR}/runtime/install-summary.txt"
-  log "Use: cd ${INSTALL_DIR} && ./scripts/manage.sh links"
+  print_install_summary
 }
 
 main "$@"
