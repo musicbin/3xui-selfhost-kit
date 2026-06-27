@@ -7,13 +7,20 @@
 - `ghcr.io/mhsanaei/3x-ui:latest`
 - `caddy:2-alpine`，仅当你启用静态伪装站点时使用
 
-## 一条命令部署
+## 最新一键安装
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh \
+  | sudo env CONFIG_WIZARD=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
+```
+
+这条是当前推荐命令：会进入命令行配置向导，安装后自动打印可视化面板公网地址、账号密码、SSH 隧道、协议配置、终端菜单，并自动设置开机自启动。向导通过 `/dev/tty` 读取输入，所以 `curl | sudo env ... bash` 也能正常选择。
+
+如果你想用最短写法，也可以：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh | sudo bash
 ```
-
-默认会进入命令行配置向导，让你选择面板是否公网开放、面板端口、随机路径、REALITY 目标、是否启用 Hysteria2/Trojan/Shadowsocks、是否配置链式代理。向导通过 `/dev/tty` 读取输入，所以 `curl | sudo bash` 也能正常选择。
 
 如果想完全无交互，使用安全默认值：
 
