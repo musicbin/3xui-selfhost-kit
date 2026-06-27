@@ -53,6 +53,9 @@ ensure_base_tools() {
 
 ensure_docker() {
   if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl enable --now docker || true
+    fi
     return
   fi
 
@@ -104,6 +107,45 @@ install_cli_shortcut() {
   mkdir -p /usr/local/bin
   ln -sf "${INSTALL_DIR}/scripts/menu.sh" /usr/local/bin/3xui-kit
   chmod +x "${INSTALL_DIR}/scripts/menu.sh"
+}
+
+install_systemd_autostart() {
+  if [ "${ENABLE_SYSTEMD_AUTOSTART:-1}" != "1" ]; then
+    return
+  fi
+  if ! command -v systemctl >/dev/null 2>&1; then
+    log "systemd not found; Docker restart policy remains enabled."
+    return
+  fi
+  if ! systemctl list-unit-files >/dev/null 2>&1; then
+    log "systemd is not running; Docker restart policy remains enabled."
+    return
+  fi
+
+  local docker_bin
+  docker_bin="$(command -v docker)"
+  cat > /etc/systemd/system/3xui-kit.service <<EOF
+[Unit]
+Description=3x-ui selfhost kit
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=${INSTALL_DIR}
+ExecStart=${docker_bin} compose up -d 3xui
+ExecStop=${docker_bin} compose stop 3xui
+RemainAfterExit=yes
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable --now 3xui-kit.service
+  log "Enabled boot autostart: 3xui-kit.service"
 }
 
 public_ip() {
@@ -335,7 +377,7 @@ write_install_summary() {
   local summary="${INSTALL_DIR}/runtime/install-summary.txt"
   local public_panel_url="http://${SERVER_ADDR:-your-server}:${PANEL_PORT:-2053}/${WEB_BASE_PATH:-panel}/"
   local tunnel_cmd="ssh -L ${PANEL_PORT:-2053}:127.0.0.1:${PANEL_PORT:-2053} root@${SERVER_ADDR:-your-server}"
-  local local_panel_url="http://127.0.0.1:${PANEL_PORT:-2053}/${WEB_BASE_PATH:-panel}/"
+  local tunnel_panel_url="http://127.0.0.1:${PANEL_PORT:-2053}/${WEB_BASE_PATH:-panel}/"
   mkdir -p "${INSTALL_DIR}/runtime"
   chmod 700 "${INSTALL_DIR}/runtime"
   cat > "$summary" <<EOF
@@ -351,14 +393,14 @@ write_install_summary() {
   Password:   ${PANEL_PASSWORD:-unknown}
 
 3) How to open the panel
-  Recommended SSH tunnel:
+  Panel public display URL:
+    ${public_panel_url}
+
+  Recommended SSH tunnel when Panel bind is 127.0.0.1:
     ${tunnel_cmd}
 
-  Then open in your browser:
-    ${local_panel_url}
-
-  If you intentionally set PANEL_LISTEN_IP=0.0.0.0, the direct URL is:
-    ${public_panel_url}
+  Tunnel browser URL:
+    ${tunnel_panel_url}
 
 4) Client config links
   Script-generated main links:
@@ -408,6 +450,12 @@ write_install_summary() {
 8) Firewall reminder
   Public: open ${REALITY_PORT:-443}/tcp for VLESS REALITY.
   Private: keep ${PANEL_PORT:-2053}/tcp closed to public internet when PANEL_LISTEN_IP=127.0.0.1.
+
+9) Autostart
+  Docker container restart policy: unless-stopped
+  systemd service: 3xui-kit.service
+  Check status:
+    systemctl status 3xui-kit.service --no-pager
 EOF
   chmod 600 "$summary"
 }
@@ -439,6 +487,7 @@ main() {
   install_cli_shortcut
   write_env
   compose_up
+  install_systemd_autostart
   load_env
   wait_panel_db
   configure_panel

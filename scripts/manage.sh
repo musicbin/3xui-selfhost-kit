@@ -39,6 +39,7 @@ Commands:
   apply-presets  Re-apply protocol presets from .env
   links          Print generated client links
   token          Generate a fresh 3x-ui API token
+  autostart      Open boot autostart settings
 EOF
 }
 
@@ -51,12 +52,13 @@ case "$cmd" in
   status)
     docker compose ps
     echo
-    if [ -f runtime/install-summary.txt ]; then
-      cat runtime/install-summary.txt
+    if [ -x ./scripts/menu.sh ]; then
+      ./scripts/menu.sh --print
     else
       echo "Visual panel:"
       echo "  Bind:      ${PANEL_LISTEN_IP:-127.0.0.1}:${PANEL_PORT:-2053}"
       echo "  Path:      /${WEB_BASE_PATH:-panel}/"
+      echo "  Public:    http://${SERVER_ADDR:-your-server}:${PANEL_PORT:-2053}/${WEB_BASE_PATH:-panel}/"
       echo "  Username:  ${PANEL_USERNAME:-unknown}"
       echo "  Password:  ${PANEL_PASSWORD:-unknown}"
       echo
@@ -109,6 +111,9 @@ case "$cmd" in
     ;;
   token)
     docker exec "$XUI_CONTAINER" /app/x-ui setting -getApiToken true
+    ;;
+  autostart)
+    ./scripts/menu.sh --autostart
     ;;
   *)
     usage

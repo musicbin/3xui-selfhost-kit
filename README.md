@@ -44,6 +44,7 @@ sudo cat /opt/3xui-selfhost-kit/runtime/client-links.txt
 - 客户端链接文件位置
 - Hysteria2、Trojan、Shadowsocks、链式代理的启用命令
 - 类似 x-ui-yg 的终端菜单面板，并创建快捷命令 `3xui-kit`
+- 开机自启动状态：Docker `restart: unless-stopped` + `3xui-kit.service`
 
 之后想重新显示这些信息：
 
@@ -55,15 +56,43 @@ sudo ./scripts/manage.sh status
 sudo ./scripts/manage.sh links
 ```
 
+## 开机自启动
+
+安装脚本会自动设置自启动：
+
+- Docker 服务会执行 `systemctl enable --now docker`
+- 3x-ui 容器使用 Compose 的 `restart: unless-stopped`
+- 额外创建并启用 systemd 服务 `3xui-kit.service`
+
+查看状态：
+
+```bash
+systemctl status 3xui-kit.service --no-pager
+sudo 3xui-kit
+```
+
+如果你只想跳过 systemd 服务创建，安装时加：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh \
+  | sudo env ENABLE_SYSTEMD_AUTOSTART=0 bash
+```
+
 ## 打开面板
 
-默认面板只监听服务器本机 `127.0.0.1:2053`，公网扫不到。用 SSH 隧道打开：
+菜单和安装摘要里的“面板公网地址”会显示你的服务器公网 IP 或域名，例如：
+
+```text
+http://your.server.ip:2053/随机路径/
+```
+
+默认面板只监听服务器本机 `127.0.0.1:2053`，公网扫不到；这种安全模式下，公网地址用于识别服务器和路径，实际打开需要先建 SSH 隧道：
 
 ```bash
 ssh -L 2053:127.0.0.1:2053 root@your.server.ip
 ```
 
-然后浏览器打开安装摘要里的地址，形如：
+然后浏览器打开隧道地址，形如：
 
 ```text
 http://127.0.0.1:2053/随机路径/
@@ -164,6 +193,7 @@ sudo ./scripts/manage.sh logs
 sudo ./scripts/manage.sh backup
 sudo ./scripts/manage.sh links
 sudo ./scripts/manage.sh apply-presets
+sudo ./scripts/manage.sh autostart
 ```
 
 ## 端口建议

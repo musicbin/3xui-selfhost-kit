@@ -29,6 +29,7 @@ SERVER_ADDR="${SERVER_ADDR:-your-server}"
 REALITY_PORT="${REALITY_PORT:-443}"
 REALITY_TARGET="${REALITY_TARGET:-www.cloudflare.com:443}"
 REALITY_SERVER_NAMES="${REALITY_SERVER_NAMES:-www.cloudflare.com,cloudflare.com}"
+AUTOSTART_SERVICE="${AUTOSTART_SERVICE:-3xui-kit.service}"
 
 green=$'\033[0;32m'
 cyan=$'\033[0;36m'
@@ -96,12 +97,43 @@ container_health() {
   esac
 }
 
-panel_url() {
-  if [ "$PANEL_LISTEN_IP" = "127.0.0.1" ] || [ "$PANEL_LISTEN_IP" = "localhost" ]; then
-    printf 'http://127.0.0.1:%s/%s/' "$PANEL_PORT" "${WEB_BASE_PATH#/}"
-  else
-    printf 'http://%s:%s/%s/' "$SERVER_ADDR" "$PANEL_PORT" "${WEB_BASE_PATH#/}"
+docker_restart_policy() {
+  docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$XUI_CONTAINER" 2>/dev/null || printf 'unknown'
+}
+
+systemd_available() {
+  command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files >/dev/null 2>&1
+}
+
+autostart_status() {
+  local policy enabled active
+  policy="$(docker_restart_policy)"
+  if ! systemd_available; then
+    printf '%s无 systemd%s，Docker重启策略: %s' "$yellow" "$plain" "$policy"
+    return
   fi
+
+  enabled="$(systemctl is-enabled "$AUTOSTART_SERVICE" 2>/dev/null || true)"
+  active="$(systemctl is-active "$AUTOSTART_SERVICE" 2>/dev/null || true)"
+  case "$enabled" in
+    enabled)
+      printf '%ssystemd已启用%s (%s)，Docker重启策略: %s' "$cyan" "$plain" "$active" "$policy"
+      ;;
+    disabled)
+      printf '%ssystemd未启用%s，Docker重启策略: %s' "$yellow" "$plain" "$policy"
+      ;;
+    *)
+      printf '%ssystemd未安装服务%s，Docker重启策略: %s' "$yellow" "$plain" "$policy"
+      ;;
+  esac
+}
+
+panel_url() {
+  printf 'http://%s:%s/%s/' "$SERVER_ADDR" "$PANEL_PORT" "${WEB_BASE_PATH#/}"
+}
+
+tunnel_url() {
+  printf 'http://127.0.0.1:%s/%s/' "$PANEL_PORT" "${WEB_BASE_PATH#/}"
 }
 
 tunnel_cmd() {
@@ -152,14 +184,14 @@ write_runtime_summary() {
   Password:   ${PANEL_PASSWORD:-unknown}
 
 3) How to open the panel
-  Recommended SSH tunnel:
+  Panel public display URL:
+    $(panel_url)
+
+  Recommended SSH tunnel when Panel bind is 127.0.0.1:
     $(tunnel_cmd)
 
-  Then open in your browser:
-    http://127.0.0.1:${PANEL_PORT}/${WEB_BASE_PATH}/
-
-  Direct URL when PANEL_LISTEN_IP is public:
-    http://${SERVER_ADDR}:${PANEL_PORT}/${WEB_BASE_PATH}/
+  Tunnel browser URL:
+    $(tunnel_url)
 
 4) Client config links
   ${ROOT_DIR}/runtime/client-links.txt
@@ -170,6 +202,12 @@ write_runtime_summary() {
   Port: ${REALITY_PORT}
   Reality target: ${REALITY_TARGET}
   Reality server names: ${REALITY_SERVER_NAMES}
+
+6) Autostart
+  Docker container restart policy: $(docker_restart_policy)
+  systemd service: ${AUTOSTART_SERVICE}
+  Check status:
+    systemctl status ${AUTOSTART_SERVICE} --no-pager
 EOF
   chmod 600 runtime/install-summary.txt
 }
@@ -192,6 +230,7 @@ show_header() {
   echo "${green}10. 启动 / 更新 80 端口伪装静态站点${plain}"
   echo "${green}11. 刷新并显示节点链接${plain}"
   echo "${green}12. 显示使用说明和安全建议${plain}"
+  echo "${green}13. 开机自启动设置【启用/禁用/查看】${plain}"
   line
   echo "${green} 0. 退出脚本${plain}"
   warn_line
@@ -204,11 +243,13 @@ show_status() {
   echo "服务器地址: ${blue}${SERVER_ADDR}${plain}"
   line
   echo "3x-ui容器状态: $(container_health)"
+  echo "开机自启动: $(autostart_status)"
   echo "面板监听: ${cyan}${PANEL_LISTEN_IP}:${PANEL_PORT}${plain}"
   echo "面板路径: ${cyan}/${WEB_BASE_PATH}/ ${plain}"
-  echo "面板地址: ${blue}$(panel_url)${plain}"
+  echo "面板公网地址: ${blue}$(panel_url)${plain}"
   if [ "$PANEL_LISTEN_IP" = "127.0.0.1" ] || [ "$PANEL_LISTEN_IP" = "localhost" ]; then
     echo "SSH隧道: ${yellow}$(tunnel_cmd)${plain}"
+    echo "隧道访问地址: ${blue}$(tunnel_url)${plain}"
   fi
   line
   echo "x-ui登录信息如下:"
@@ -343,6 +384,88 @@ service_menu() {
   esac
 }
 
+require_root_for_autostart() {
+  if [ "$(id -u)" -eq 0 ]; then
+    return 0
+  fi
+  echo "${red}自启动服务写入 /etc/systemd/system，需要 root 权限。请使用：sudo 3xui-kit${plain}"
+  return 1
+}
+
+install_autostart_service() {
+  if ! systemd_available; then
+    echo "${yellow}当前系统没有可用 systemd，已保留 Docker restart policy: $(docker_restart_policy)${plain}"
+    return 1
+  fi
+  require_root_for_autostart || return 1
+
+  local docker_bin
+  docker_bin="$(command -v docker || true)"
+  if [ -z "$docker_bin" ]; then
+    echo "${red}未找到 docker 命令，无法创建自启动服务。${plain}"
+    return 1
+  fi
+
+  cat > "/etc/systemd/system/${AUTOSTART_SERVICE}" <<EOF
+[Unit]
+Description=3x-ui selfhost kit
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=${ROOT_DIR}
+ExecStart=${docker_bin} compose up -d 3xui
+ExecStop=${docker_bin} compose stop 3xui
+RemainAfterExit=yes
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable --now "$AUTOSTART_SERVICE"
+  write_runtime_summary
+  echo "${cyan}已启用开机自启动：${AUTOSTART_SERVICE}${plain}"
+}
+
+disable_autostart_service() {
+  if ! systemd_available; then
+    echo "${yellow}当前系统没有可用 systemd。${plain}"
+    return 1
+  fi
+  require_root_for_autostart || return 1
+  systemctl disable "$AUTOSTART_SERVICE" >/dev/null 2>&1 || true
+  echo "${yellow}已禁用 systemd 自启动服务。Docker restart policy 仍按 compose.yaml 保留。${plain}"
+}
+
+show_autostart_detail() {
+  echo "当前自启动状态: $(autostart_status)"
+  if systemd_available; then
+    echo
+    systemctl status "$AUTOSTART_SERVICE" --no-pager || true
+  fi
+}
+
+autostart_menu() {
+  echo "${cyan}开机自启动设置${plain}"
+  echo "当前: $(autostart_status)"
+  echo
+  echo "1. 启用 / 修复 systemd 自启动"
+  echo "2. 禁用 systemd 自启动"
+  echo "3. 查看自启动详情"
+  echo "0. 返回"
+  read -r -p "请选择: " c </dev/tty || c=""
+  case "$c" in
+    1) install_autostart_service ;;
+    2) disable_autostart_service ;;
+    3) show_autostart_detail ;;
+    *) return 0 ;;
+  esac
+}
+
 show_help() {
   cat <<EOF
 常用命令:
@@ -352,12 +475,18 @@ show_help() {
   ./scripts/manage.sh links
   ./scripts/manage.sh update
   ./scripts/manage.sh backup
+  ./scripts/manage.sh autostart
 
 安全建议:
   1. 面板默认绑定 127.0.0.1，通过 SSH 隧道访问。
   2. 公网只开放 ${REALITY_PORT}/tcp 给 VLESS REALITY。
   3. 不要把 .env、install-summary.txt、订阅链接发给别人。
   4. Trojan/Hysteria2 建议使用真实可信 TLS 证书。
+
+自启动:
+  1. Docker Compose 已设置 restart: unless-stopped。
+  2. 安装脚本会启用 systemd 服务：${AUTOSTART_SERVICE}。
+  3. 查看状态：systemctl status ${AUTOSTART_SERVICE} --no-pager
 EOF
 }
 
@@ -365,7 +494,7 @@ main_loop() {
   while true; do
     refresh_env
     show_menu
-    read -r -p "请输入选项 [0-12]: " choice </dev/tty || choice="0"
+    read -r -p "请输入选项 [0-13]: " choice </dev/tty || choice="0"
     case "$choice" in
       1) install_or_start; pause ;;
       2) uninstall_xui; pause ;;
@@ -379,6 +508,7 @@ main_loop() {
       10) docker compose --profile site up -d caddy-site; pause ;;
       11) ./scripts/apply-presets.sh; show_links; pause ;;
       12) show_help; pause ;;
+      13) autostart_menu; pause ;;
       0) exit 0 ;;
       *) echo "${yellow}无效选项。${plain}"; pause ;;
     esac
@@ -387,6 +517,11 @@ main_loop() {
 
 if [ "${1:-}" = "--print" ]; then
   show_menu
+  exit 0
+fi
+
+if [ "${1:-}" = "--autostart" ]; then
+  autostart_menu
   exit 0
 fi
 
