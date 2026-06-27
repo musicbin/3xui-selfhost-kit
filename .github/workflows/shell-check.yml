@@ -1,0 +1,17 @@
+name: shell-check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  bash-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check bash syntax
+        run: |
+          bash -n install.sh
+          bash -n scripts/manage.sh
+          bash -n scripts/apply-presets.sh
+
