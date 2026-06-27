@@ -78,15 +78,30 @@ api_token() {
 }
 
 TOKEN="$(api_token)"
+CURL_RETRY=(--connect-timeout 3 --max-time 30 --retry 20 --retry-delay 2 --retry-connrefused)
+
+wait_api() {
+  local i
+  echo "Waiting for 3x-ui API at ${API_BASE}/panel/api/server/status ..."
+  for i in $(seq 1 90); do
+    if curl -fsS --connect-timeout 2 --max-time 5 -H "Authorization: Bearer ${TOKEN}" \
+      "$API_BASE/panel/api/server/status" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  echo "3x-ui API did not become reachable in time." >&2
+  return 1
+}
 
 api_get() {
-  curl -fsS -H "Authorization: Bearer ${TOKEN}" "$API_BASE$1"
+  curl -fsS "${CURL_RETRY[@]}" -H "Authorization: Bearer ${TOKEN}" "$API_BASE$1"
 }
 
 api_post_json() {
   local path="$1"
   local file="$2"
-  curl -fsS -X POST \
+  curl -fsS "${CURL_RETRY[@]}" -X POST \
     -H "Authorization: Bearer ${TOKEN}" \
     -H "Content-Type: application/json" \
     --data-binary "@${file}" \
@@ -96,7 +111,7 @@ api_post_json() {
 api_post_form() {
   local path="$1"
   shift
-  curl -fsS -X POST -H "Authorization: Bearer ${TOKEN}" "$@" "$API_BASE$path"
+  curl -fsS "${CURL_RETRY[@]}" -X POST -H "Authorization: Bearer ${TOKEN}" "$@" "$API_BASE$path"
 }
 
 inbound_exists() {
@@ -555,6 +570,7 @@ apply_chain_optional() {
 }
 
 : > runtime/client-links.txt
+wait_api
 write_vless_reality
 write_hysteria2_optional
 write_trojan_optional

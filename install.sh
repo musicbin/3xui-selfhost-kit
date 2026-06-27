@@ -103,6 +103,117 @@ public_ip() {
   curl -4fsS --max-time 5 https://api.ipify.org 2>/dev/null || true
 }
 
+tty_available() {
+  [ -r /dev/tty ] && [ -w /dev/tty ]
+}
+
+tty_print() {
+  printf '%s\n' "$*" > /dev/tty
+}
+
+tty_prompt() {
+  local prompt="$1"
+  local default="${2:-}"
+  local answer
+  if [ -n "$default" ]; then
+    printf '%s [%s]: ' "$prompt" "$default" > /dev/tty
+  else
+    printf '%s: ' "$prompt" > /dev/tty
+  fi
+  IFS= read -r answer < /dev/tty || answer=""
+  printf '%s' "${answer:-$default}"
+}
+
+tty_yes_no() {
+  local prompt="$1"
+  local default="${2:-y}"
+  local suffix answer
+  if [ "$default" = "y" ]; then
+    suffix="Y/n"
+  else
+    suffix="y/N"
+  fi
+  answer="$(tty_prompt "${prompt} (${suffix})" "")"
+  answer="${answer:-$default}"
+  case "$answer" in
+    y|Y|yes|YES|Yes) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+run_config_wizard() {
+  if [ "${CONFIG_WIZARD:-1}" != "1" ] || [ -f "${INSTALL_DIR}/.env" ] || ! tty_available; then
+    return
+  fi
+
+  local detected_addr bind_choice target server_names chain_addr chain_port
+  detected_addr="$(public_ip)"
+
+  tty_print ""
+  tty_print "============================================================"
+  tty_print "  3x-ui self-host setup"
+  tty_print "============================================================"
+  tty_print "Press Enter to accept the safe default shown in brackets."
+  tty_print ""
+
+  SERVER_ADDR="${SERVER_ADDR:-$(tty_prompt "Server public IP or domain for client links" "${detected_addr}")}"
+
+  tty_print ""
+  tty_print "Panel exposure:"
+  tty_print "  1) Safe: bind panel to 127.0.0.1 and open through SSH tunnel"
+  tty_print "  2) Public: bind panel to 0.0.0.0"
+  bind_choice="$(tty_prompt "Choose panel exposure" "1")"
+  if [ "$bind_choice" = "2" ]; then
+    PANEL_LISTEN_IP="${PANEL_LISTEN_IP:-0.0.0.0}"
+  else
+    PANEL_LISTEN_IP="${PANEL_LISTEN_IP:-127.0.0.1}"
+  fi
+
+  PANEL_PORT="${PANEL_PORT:-$(tty_prompt "Panel port" "2053")}"
+  WEB_BASE_PATH="${WEB_BASE_PATH:-$(tty_prompt "Panel random path, without leading slash" "p$(random_hex 9)")}"
+  REALITY_PORT="${REALITY_PORT:-$(tty_prompt "VLESS REALITY public port" "443")}"
+  target="$(tty_prompt "REALITY target" "${REALITY_TARGET:-www.cloudflare.com:443}")"
+  REALITY_TARGET="${REALITY_TARGET:-$target}"
+  server_names="$(tty_prompt "REALITY server names, comma-separated" "${REALITY_SERVER_NAMES:-www.cloudflare.com,cloudflare.com}")"
+  REALITY_SERVER_NAMES="${REALITY_SERVER_NAMES:-$server_names}"
+
+  if tty_yes_no "Enable Hysteria2 now? It needs a real TLS certificate for best security" "n"; then
+    ENABLE_HYSTERIA=1
+    HYSTERIA_PORT="${HYSTERIA_PORT:-$(tty_prompt "Hysteria2 UDP port" "8443")}"
+    TLS_CERT_FILE="${TLS_CERT_FILE:-$(tty_prompt "TLS cert path inside container/host, e.g. /root/cert/fullchain.pem" "${TLS_CERT_FILE:-}")}"
+    TLS_KEY_FILE="${TLS_KEY_FILE:-$(tty_prompt "TLS key path inside container/host, e.g. /root/cert/privkey.pem" "${TLS_KEY_FILE:-}")}"
+  fi
+
+  if tty_yes_no "Enable Trojan WS TLS now? It needs a real TLS certificate for best security" "n"; then
+    ENABLE_TROJAN=1
+    TROJAN_PORT="${TROJAN_PORT:-$(tty_prompt "Trojan TCP port" "9443")}"
+    TLS_CERT_FILE="${TLS_CERT_FILE:-$(tty_prompt "TLS cert path inside container/host" "${TLS_CERT_FILE:-}")}"
+    TLS_KEY_FILE="${TLS_KEY_FILE:-$(tty_prompt "TLS key path inside container/host" "${TLS_KEY_FILE:-}")}"
+  fi
+
+  if tty_yes_no "Enable Shadowsocks 2022 now?" "n"; then
+    ENABLE_SHADOWSOCKS=1
+    SHADOWSOCKS_PORT="${SHADOWSOCKS_PORT:-$(tty_prompt "Shadowsocks TCP/UDP port" "8388")}"
+  fi
+
+  if tty_yes_no "Configure chain proxy outbound now?" "n"; then
+    CHAIN_ENABLED=1
+    CHAIN_MODE="${CHAIN_MODE:-$(tty_prompt "Chain mode: manual or all" "manual")}"
+    CHAIN_TYPE="${CHAIN_TYPE:-$(tty_prompt "Chain type: socks or http" "socks")}"
+    chain_addr="$(tty_prompt "Chain proxy address" "${CHAIN_ADDRESS:-}")"
+    chain_port="$(tty_prompt "Chain proxy port" "${CHAIN_PORT:-}")"
+    CHAIN_ADDRESS="${CHAIN_ADDRESS:-$chain_addr}"
+    CHAIN_PORT="${CHAIN_PORT:-$chain_port}"
+    CHAIN_USER="${CHAIN_USER:-$(tty_prompt "Chain username, optional" "${CHAIN_USER:-}")}"
+    CHAIN_PASS="${CHAIN_PASS:-$(tty_prompt "Chain password, optional" "${CHAIN_PASS:-}")}"
+  fi
+
+  tty_print ""
+  tty_print "Configuration captured. Installing now..."
+  tty_print "============================================================"
+  tty_print ""
+}
+
 write_env() {
   cd "$INSTALL_DIR"
   if [ -f .env ]; then
@@ -137,6 +248,9 @@ ENABLE_HYSTERIA=${ENABLE_HYSTERIA:-0}
 ENABLE_TROJAN=${ENABLE_TROJAN:-0}
 ENABLE_SHADOWSOCKS=${ENABLE_SHADOWSOCKS:-0}
 ALLOW_SELF_SIGNED_TLS=${ALLOW_SELF_SIGNED_TLS:-0}
+TLS_CERT_FILE=${TLS_CERT_FILE:-}
+TLS_KEY_FILE=${TLS_KEY_FILE:-}
+TLS_SERVER_NAME=${TLS_SERVER_NAME:-}
 HYSTERIA_PORT=${HYSTERIA_PORT:-8443}
 TROJAN_PORT=${TROJAN_PORT:-9443}
 SHADOWSOCKS_PORT=${SHADOWSOCKS_PORT:-8388}
@@ -179,6 +293,21 @@ wait_panel_db() {
   die "3x-ui did not become ready in time. Check: cd ${INSTALL_DIR} && docker compose logs 3xui"
 }
 
+wait_panel_http() {
+  load_env
+  local url="http://127.0.0.1:${PANEL_PORT:-2053}/${WEB_BASE_PATH#/}/"
+  local i
+  log "Waiting for panel web endpoint: ${url}"
+  for i in $(seq 1 90); do
+    if curl -sS --max-time 2 -o /dev/null "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  log "Panel web endpoint did not answer yet; continuing so credentials can be shown."
+  return 1
+}
+
 configure_panel() {
   load_env
   local path_no_slash="${WEB_BASE_PATH#/}"
@@ -191,6 +320,7 @@ configure_panel() {
     -webBasePath "$path_no_slash" >/dev/null
   docker restart "$XUI_CONTAINER" >/dev/null
   wait_panel_db
+  wait_panel_http || true
 }
 
 write_install_summary() {
@@ -294,6 +424,7 @@ print_install_summary() {
 main() {
   need_root
   ensure_base_tools
+  run_config_wizard
   ensure_docker
   download_project
   write_env
@@ -304,7 +435,10 @@ main() {
 
   if [ "${ENABLE_PRESETS:-1}" = "1" ]; then
     log "Applying protocol presets."
-    (cd "$INSTALL_DIR" && ./scripts/apply-presets.sh)
+    if ! (cd "$INSTALL_DIR" && ./scripts/apply-presets.sh); then
+      log "Protocol presets were not fully applied. The panel credentials will still be printed below."
+      log "After the panel is reachable, run: cd ${INSTALL_DIR} && ./scripts/manage.sh apply-presets"
+    fi
   fi
 
   write_install_summary

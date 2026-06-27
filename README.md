@@ -13,11 +13,19 @@
 curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh | sudo bash
 ```
 
+默认会进入命令行配置向导，让你选择面板是否公网开放、面板端口、随机路径、REALITY 目标、是否启用 Hysteria2/Trojan/Shadowsocks、是否配置链式代理。向导通过 `/dev/tty` 读取输入，所以 `curl | sudo bash` 也能正常选择。
+
+如果想完全无交互，使用安全默认值：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh | sudo env CONFIG_WIZARD=0 bash
+```
+
 带域名或指定地址：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh \
-  | sudo SERVER_ADDR=your.domain.com REALITY_TARGET=www.cloudflare.com:443 REALITY_SERVER_NAMES=www.cloudflare.com,cloudflare.com bash
+  | sudo env SERVER_ADDR=your.domain.com REALITY_TARGET=www.cloudflare.com:443 REALITY_SERVER_NAMES=www.cloudflare.com,cloudflare.com bash
 ```
 
 安装完成后查看：
