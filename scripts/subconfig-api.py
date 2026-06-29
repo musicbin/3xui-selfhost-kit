@@ -219,7 +219,10 @@ def parse_node(link):
         return parts
 
     if scheme == "ss":
-        userinfo = unquote(parsed.username or "")
+        if "@" in parsed.netloc:
+            userinfo = unquote(parsed.netloc.rsplit("@", 1)[0])
+        else:
+            userinfo = unquote(parsed.username or "")
         if ":" in userinfo:
             decoded = userinfo
         else:
