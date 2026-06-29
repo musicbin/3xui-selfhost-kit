@@ -464,8 +464,8 @@ write_shadowsocks_optional() {
   fi
   local remark server_password client_password sub_id file
   remark="auto-shadowsocks-2022-${SHADOWSOCKS_PORT:-8388}"
-  server_password="$(rand_b64 24)"
-  client_password="$(rand_b64 24)"
+  server_password="$(rand_b64 32)"
+  client_password="$(rand_b64 32)"
   sub_id="$(rand_hex 8)"
   file="runtime/shadowsocks-2022.json"
 
