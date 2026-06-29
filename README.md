@@ -134,6 +134,12 @@ Web UI 会默认读取本机 token 化订阅：
 /subscriptions/<token>.txt
 ```
 
+同时会生成给 subconverter 使用的 Base64 订阅：
+
+```text
+/subscriptions/<token>.b64
+```
+
 支持转换为 Clash、sing-box、V2Ray、Surge、Quantumult X 等格式，默认规则配置使用本机内置的 `3.5.yaml`：
 
 ```text
@@ -149,6 +155,12 @@ https://your.domain/sub/config/3.5.yaml
 ```
 
 也就是你的订阅转换会继续按这份 `3.5.yaml` 的分流规则生成配置。
+
+最推荐给 Clash 使用的是这个渲染后的订阅链接，它会读取当前节点，再把节点参数填入 `3.5.yaml` 的 `proxies:`，并保留原来的节点名称和下面所有分流规则：
+
+```text
+https://your.domain/subconfig-api/render/clash?token=<token>
+```
 
 重新生成订阅页：
 

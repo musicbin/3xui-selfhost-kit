@@ -247,6 +247,8 @@ write_runtime_summary() {
 8) Subscription converter
   Web UI: $(web_origin)/sub/
   Local node subscription: $(web_origin)/subscriptions/${SUBSCRIPTION_TOKEN:-token}.txt
+  Base64 subscription: $(web_origin)/subscriptions/${SUBSCRIPTION_TOKEN:-token}.b64
+  Clash 3.5.yaml subscription: $(web_origin)/subconfig-api/render/clash?token=${SUBSCRIPTION_TOKEN:-token}
   Default local conversion config: $(web_origin)/sub/config/3.5.yaml
   Rules editor token: ${SUB_CONFIG_ADMIN_TOKEN:-not generated yet}
   Note: If HTTPS_SITE_ENABLE=0 and HTTPS_HTTP_MODE=reject, public /sub/ is intentionally blocked after certificate setup.

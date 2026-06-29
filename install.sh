@@ -634,6 +634,10 @@ write_install_summary() {
     $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s/sub/' "${SERVER_ADDR:-your-server}" || printf 'http://%s:%s/sub/' "${SERVER_ADDR:-your-server}" "${SITE_HTTP_PORT:-80}")
   Local node subscription:
     $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s/subscriptions/%s.txt' "${SERVER_ADDR:-your-server}" "${SUBSCRIPTION_TOKEN:-token}" || printf 'http://%s:%s/subscriptions/%s.txt' "${SERVER_ADDR:-your-server}" "${SITE_HTTP_PORT:-80}" "${SUBSCRIPTION_TOKEN:-token}")
+  Base64 subscription for subconverter:
+    $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s/subscriptions/%s.b64' "${SERVER_ADDR:-your-server}" "${SUBSCRIPTION_TOKEN:-token}" || printf 'http://%s:%s/subscriptions/%s.b64' "${SERVER_ADDR:-your-server}" "${SITE_HTTP_PORT:-80}" "${SUBSCRIPTION_TOKEN:-token}")
+  Clash 3.5.yaml rendered subscription:
+    $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s/subconfig-api/render/clash?token=%s' "${SERVER_ADDR:-your-server}" "${SUBSCRIPTION_TOKEN:-token}" || printf 'http://%s:%s/subconfig-api/render/clash?token=%s' "${SERVER_ADDR:-your-server}" "${SITE_HTTP_PORT:-80}" "${SUBSCRIPTION_TOKEN:-token}")
   Default local conversion config:
     $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s/sub/config/3.5.yaml' "${SERVER_ADDR:-your-server}" || printf 'http://%s:%s/sub/config/3.5.yaml' "${SERVER_ADDR:-your-server}" "${SITE_HTTP_PORT:-80}")
   Rules editor:

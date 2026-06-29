@@ -4,11 +4,16 @@ import os
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, unquote, urlparse
+import base64
+import json
+import re
 
 
 CONFIG_PATH = Path(os.environ.get("SUB_CONFIG_PATH", "/config/3.5.yaml"))
 ADMIN_TOKEN = os.environ.get("SUB_CONFIG_ADMIN_TOKEN", "")
+SUBSCRIPTION_TOKEN = os.environ.get("SUBSCRIPTION_TOKEN", "")
+SUBSCRIPTION_DIR = Path(os.environ.get("SUBSCRIPTION_DIR", "/subscriptions"))
 MAX_BYTES = int(os.environ.get("SUB_CONFIG_MAX_BYTES", "2097152"))
 
 
@@ -53,9 +58,13 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
         if path == "/health":
             self.send_text(200, "ok")
+            return
+        if path == "/render/clash":
+            self.render_clash(parsed)
             return
         if path != "/config":
             self.send_text(404, "Not found.")
@@ -109,6 +118,179 @@ class Handler(BaseHTTPRequestHandler):
         os.replace(tmp_name, CONFIG_PATH)
         os.chmod(CONFIG_PATH, 0o644)
         self.send_text(200, "Saved.")
+
+    def render_clash(self, parsed):
+        params = parse_qs(parsed.query)
+        token = params.get("token", [""])[0]
+        if not token or not SUBSCRIPTION_TOKEN or not hmac.compare_digest(token, SUBSCRIPTION_TOKEN):
+            self.send_text(401, "Unauthorized.")
+            return
+        if not CONFIG_PATH.exists():
+            self.send_text(404, "Config file not found.")
+            return
+        sub_path = SUBSCRIPTION_DIR / f"{SUBSCRIPTION_TOKEN}.txt"
+        if not sub_path.exists():
+            self.send_text(404, "Subscription file not found.")
+            return
+        try:
+            config_text = CONFIG_PATH.read_text(encoding="utf-8")
+            links = [line.strip() for line in sub_path.read_text(encoding="utf-8").splitlines()]
+            links = [line for line in links if re.match(r"^(vless|trojan|ss)://", line)]
+            rendered = render_clash_config(config_text, links)
+        except Exception as exc:
+            self.send_text(500, f"Render failed: {exc}")
+            return
+        self.send_text(200, rendered, "text/yaml; charset=utf-8")
+
+
+def q(value):
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def parse_port(parsed):
+    if parsed.port is None:
+        return 443
+    return parsed.port
+
+
+def link_name(parsed, fallback):
+    if parsed.fragment:
+        return unquote(parsed.fragment)
+    return fallback
+
+
+def parse_node(link):
+    parsed = urlparse(link)
+    scheme = parsed.scheme.lower()
+    query = parse_qs(parsed.query)
+    name = link_name(parsed, f"{scheme}-{parsed.hostname or 'node'}")
+    host = parsed.hostname or ""
+    port = parse_port(parsed)
+
+    if scheme == "vless":
+        uuid = unquote(parsed.username or "")
+        sni = query.get("sni", [""])[0]
+        pbk = query.get("pbk", [""])[0]
+        sid = query.get("sid", [""])[0]
+        fp = query.get("fp", ["chrome"])[0]
+        flow = query.get("flow", [""])[0]
+        parts = [
+            f"name: {q(name)}",
+            f"server: {q(host)}",
+            f"port: {port}",
+            "type: vless",
+            f"uuid: {q(uuid)}",
+            "tls: true",
+            "network: tcp",
+            "udp: true",
+        ]
+        if flow:
+            parts.append(f"flow: {q(flow)}")
+        if sni:
+            parts.append(f"servername: {q(sni)}")
+        if fp:
+            parts.append(f"client-fingerprint: {q(fp)}")
+        if pbk:
+            reality = f"public-key: {q(pbk)}"
+            if sid:
+                reality += f", short-id: {q(sid)}"
+            parts.append(f"reality-opts: {{{reality}}}")
+        return parts
+
+    if scheme == "trojan":
+        password = unquote(parsed.username or "")
+        sni = query.get("sni", [host])[0]
+        path = query.get("path", ["/"])[0]
+        network = query.get("type", query.get("network", ["tcp"]))[0]
+        parts = [
+            f"name: {q(name)}",
+            f"server: {q(host)}",
+            f"port: {port}",
+            "type: trojan",
+            f"password: {q(password)}",
+            "tls: true",
+            "udp: true",
+        ]
+        if sni:
+            parts.append(f"sni: {q(sni)}")
+        if network == "ws":
+            parts.append("network: ws")
+            parts.append(f"ws-opts: {{path: {q(path)}, headers: {{Host: {q(sni or host)}}}}}")
+        return parts
+
+    if scheme == "ss":
+        userinfo = parsed.username or ""
+        padding = "=" * (-len(userinfo) % 4)
+        decoded = base64.urlsafe_b64decode((userinfo + padding).encode()).decode("utf-8")
+        method, *password_parts = decoded.split(":")
+        password = ":".join(password_parts)
+        return [
+            f"name: {q(name)}",
+            f"server: {q(host)}",
+            f"port: {port}",
+            "type: ss",
+            f"cipher: {q(method)}",
+            f"password: {q(password)}",
+            "udp: true",
+        ]
+
+    return None
+
+
+def placeholder_names(config_text):
+    names = []
+    in_proxies = False
+    for line in config_text.splitlines():
+        if re.match(r"^proxies:\s*$", line):
+            in_proxies = True
+            continue
+        if in_proxies and re.match(r"^[A-Za-z0-9_-][^:]*:\s*", line):
+            break
+        if in_proxies:
+            match = re.search(r"name:\s*([^,}]+)", line)
+            if match:
+                names.append(match.group(1).strip().strip("\"'"))
+    return names
+
+
+def replace_proxies_block(config_text, proxy_lines):
+    lines = config_text.splitlines()
+    start = None
+    end = None
+    for idx, line in enumerate(lines):
+        if re.match(r"^proxies:\s*$", line):
+            start = idx
+            break
+    if start is None:
+        return "proxies:\n" + "\n".join(proxy_lines) + "\n" + config_text
+    end = len(lines)
+    for idx in range(start + 1, len(lines)):
+        if re.match(r"^[A-Za-z0-9_-][^:]*:\s*", lines[idx]):
+            end = idx
+            break
+    new_lines = lines[:start + 1] + proxy_lines + lines[end:]
+    return "\n".join(new_lines) + "\n"
+
+
+def render_clash_config(config_text, links):
+    nodes = []
+    for link in links:
+        node = parse_node(link)
+        if node:
+            nodes.append(node)
+    if not nodes:
+        raise ValueError("No supported nodes were found.")
+
+    names = placeholder_names(config_text)
+    proxy_lines = []
+    if names:
+        for idx, name in enumerate(names):
+            node = list(nodes[idx % len(nodes)])
+            node[0] = f"name: {q(name)}"
+            proxy_lines.append("  - {" + ", ".join(node) + "}")
+    else:
+        proxy_lines = ["  - {" + ", ".join(node) + "}" for node in nodes]
+    return replace_proxies_block(config_text, proxy_lines)
 
 
 def main():

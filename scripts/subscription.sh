@@ -102,13 +102,21 @@ EOF
 
   if [ -s runtime/client-links.txt ]; then
     awk '/^(vless|vmess|trojan|ss|hysteria2):\/\// { print }' runtime/client-links.txt > "site/subscriptions/${SUBSCRIPTION_TOKEN}.txt"
+    if command -v base64 >/dev/null 2>&1 && base64 --help 2>&1 | grep -q -- '-w'; then
+      base64 -w0 "site/subscriptions/${SUBSCRIPTION_TOKEN}.txt" > "site/subscriptions/${SUBSCRIPTION_TOKEN}.b64"
+    else
+      openssl base64 -A -in "site/subscriptions/${SUBSCRIPTION_TOKEN}.txt" -out "site/subscriptions/${SUBSCRIPTION_TOKEN}.b64"
+    fi
+    printf '\n' >> "site/subscriptions/${SUBSCRIPTION_TOKEN}.b64"
   else
     cat > "site/subscriptions/${SUBSCRIPTION_TOKEN}.txt" <<'EOF'
 # No node links generated yet.
 # Run: cd /opt/3xui-selfhost-kit && ./scripts/manage.sh apply-presets
 EOF
+    cp "site/subscriptions/${SUBSCRIPTION_TOKEN}.txt" "site/subscriptions/${SUBSCRIPTION_TOKEN}.b64"
   fi
   chmod 644 "site/subscriptions/${SUBSCRIPTION_TOKEN}.txt" 2>/dev/null || true
+  chmod 644 "site/subscriptions/${SUBSCRIPTION_TOKEN}.b64" 2>/dev/null || true
 }
 
 write_web_ui() {
@@ -158,7 +166,8 @@ write_web_ui() {
       <div>
         <label for="target">目标格式</label>
         <select id="target">
-          <option value="clash">Clash</option>
+          <option value="clash-35">Clash 3.5.yaml</option>
+          <option value="clash">Clash subconverter</option>
           <option value="singbox">sing-box</option>
           <option value="v2ray">V2Ray</option>
           <option value="surge&ver=4">Surge 4</option>
@@ -193,7 +202,9 @@ write_web_ui() {
   <script>
     const token = "${token}";
     const defaultConfig = location.origin + "/sub/config/3.5.yaml";
-    const localSub = location.origin + "/subscriptions/" + token + ".txt";
+    const rawSub = location.origin + "/subscriptions/" + token + ".txt";
+    const localSub = location.origin + "/subscriptions/" + token + ".b64";
+    const clash35 = location.origin + "/subconfig-api/render/clash?token=" + encodeURIComponent(token);
     const urlEl = document.getElementById("url");
     const targetEl = document.getElementById("target");
     const configEl = document.getElementById("config");
@@ -202,13 +213,17 @@ write_web_ui() {
     const configEditorEl = document.getElementById("configEditor");
     const editStatusEl = document.getElementById("editStatus");
     urlEl.value = localStorage.getItem("xuiSubSource") || localSub;
-    targetEl.value = localStorage.getItem("xuiSubTarget") || "clash";
+    targetEl.value = localStorage.getItem("xuiSubTarget") || "clash-35";
     configEl.value = localStorage.getItem("xuiSubConfig") || defaultConfig;
     adminTokenEl.value = localStorage.getItem("xuiSubConfigAdminToken") || "";
     function build() {
       const targetValue = targetEl.value;
       const config = configEl.value.trim();
       const source = urlEl.value.trim();
+      if (targetValue === "clash-35") {
+        resultEl.textContent = clash35;
+        return;
+      }
       const params = new URLSearchParams();
       for (const [index, part] of targetValue.split("&").entries()) {
         const [k, v] = part.split("=");

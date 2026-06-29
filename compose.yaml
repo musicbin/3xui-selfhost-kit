@@ -13,12 +13,15 @@ services:
     environment:
       SUB_CONFIG_PATH: /config/3.5.yaml
       SUB_CONFIG_ADMIN_TOKEN: ${SUB_CONFIG_ADMIN_TOKEN:-}
+      SUBSCRIPTION_TOKEN: ${SUBSCRIPTION_TOKEN:-}
+      SUBSCRIPTION_DIR: /subscriptions
       SUB_CONFIG_PORT: "27880"
     expose:
       - "27880"
     volumes:
       - ./scripts/subconfig-api.py:/app/subconfig-api.py:ro
       - ./site/sub/config:/config
+      - ./site/subscriptions:/subscriptions:ro
     restart: unless-stopped
 
   3xui:
