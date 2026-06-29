@@ -158,7 +158,10 @@ ${xui_sub_block}
 		reverse_proxy 127.0.0.1:${SUB_CONFIG_PORT:-27880}
 	}
 	@yamlConfig path /sub/config/*.yaml /sub/config/*.yml
-	header @yamlConfig Content-Type "text/yaml; charset=utf-8"
+	header @yamlConfig {
+		Content-Type "text/yaml; charset=utf-8"
+		defer
+	}
 	root * /usr/share/caddy
 	file_server
 	header {
@@ -190,7 +193,10 @@ EOF
 		reverse_proxy 127.0.0.1:${SUB_CONFIG_PORT:-27880}
 	}
 	@yamlConfig path /sub/config/*.yaml /sub/config/*.yml
-	header @yamlConfig Content-Type "text/yaml; charset=utf-8"
+	header @yamlConfig {
+		Content-Type "text/yaml; charset=utf-8"
+		defer
+	}
 	root * /usr/share/caddy
 	file_server
 	header {
