@@ -452,7 +452,7 @@ main() {
   echo "  Web入口: $(web_origin "$primary")/"
   echo "  订阅转换: $(web_origin "$primary")/sub/"
   if [ -n "${XUI_BUILTIN_SUB_PATH:-}" ]; then
-    echo "  3X-UI内置订阅: $(web_origin "$primary")${XUI_BUILTIN_SUB_PATH#/}"
+    echo "  3X-UI内置订阅: $(web_origin "$primary")${XUI_BUILTIN_SUB_PATH}"
   fi
   echo "  HTTP模式: ${HTTPS_HTTP_MODE:-reject}"
   echo "  证书: ${ROOT_DIR}/data/cert/domains/fullchain.pem"

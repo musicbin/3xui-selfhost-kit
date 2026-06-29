@@ -134,9 +134,9 @@ configure_panel_subscription() {
   set_env_var XUI_BUILTIN_CLASH_ENABLE "$XUI_BUILTIN_CLASH_ENABLE"
 
   if origin="$(web_origin)"; then
-    sub_uri="${origin}${sub_path#/}"
-    json_uri="${origin}${json_path#/}"
-    clash_uri="${origin}${clash_path#/}"
+    sub_uri="${origin}${sub_path}"
+    json_uri="${origin}${json_path}"
+    clash_uri="${origin}${clash_path}"
   else
     sub_uri=""
     json_uri=""
