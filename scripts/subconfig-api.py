@@ -219,9 +219,12 @@ def parse_node(link):
         return parts
 
     if scheme == "ss":
-        userinfo = parsed.username or ""
-        padding = "=" * (-len(userinfo) % 4)
-        decoded = base64.urlsafe_b64decode((userinfo + padding).encode()).decode("utf-8")
+        userinfo = unquote(parsed.username or "")
+        if ":" in userinfo:
+            decoded = userinfo
+        else:
+            padding = "=" * (-len(userinfo) % 4)
+            decoded = base64.urlsafe_b64decode((userinfo + padding).encode()).decode("utf-8")
         method, *password_parts = decoded.split(":")
         password = ":".join(password_parts)
         return [
