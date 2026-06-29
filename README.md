@@ -76,6 +76,8 @@ sudo ./scripts/manage.sh links
 - 80 端口普通伪装页面
 - 订阅转换 Web UI：`/sub/`
 - 3X-UI 内置订阅服务的 HTTPS 反代 URI，避免面板导出 `http://:2096` 链接
+- 安全协议守护：默认禁用 `vmess/http/mixed/mtproto/tun` 入站，保留 `vless/trojan/shadowsocks/wireguard/hysteria/tunnel`
+- `dokodemo-door` 转发预设；在 3X-UI 官方面板中协议名显示为 `tunnel`
 - `3.5.yaml` 规则配置 Web 编辑器，使用安装时生成的编辑 token
 - Docker `restart: unless-stopped`
 - systemd 自启动服务：`3xui-kit.service`
@@ -219,6 +221,32 @@ sudo CHAIN_ENABLED=1 CHAIN_MODE=all CHAIN_TYPE=trojan CHAIN_ADDRESS=upstream.exa
 
 `CHAIN_MODE=all` 会把流量路由到链式出口；`CHAIN_MODE=manual` 只添加出口，不自动改默认路由。
 
+添加 dokodemo-door 转发入站：
+
+```bash
+sudo ENABLE_DOKODEMO=1 \
+  DOKODEMO_LISTEN=127.0.0.1 \
+  DOKODEMO_PORT=18080 \
+  DOKODEMO_TARGET_ADDRESS=127.0.0.1 \
+  DOKODEMO_TARGET_PORT=80 \
+  DOKODEMO_NETWORK=tcp \
+  ./scripts/apply-presets.sh
+```
+
+说明：3X-UI 官方面板里这个协议显示为 `tunnel`，它对应 Xray 的 dokodemo-door 风格转发器。为了安全，默认监听 `127.0.0.1`；如果确实要公网转发，再把 `DOKODEMO_LISTEN` 改成 `0.0.0.0` 并确认 VPS 防火墙只开放必要端口。
+
+禁用不安全入站协议：
+
+```bash
+sudo ./scripts/manage.sh protocol-guard
+```
+
+默认允许列表是 `vless,trojan,shadowsocks,wireguard,hysteria,tunnel`。默认动作是禁用，不删除；如果要删除不安全入站：
+
+```bash
+sudo PROTOCOL_GUARD_ACTION=delete ./scripts/protocol-guard.sh
+```
+
 ## 更新
 
 ```bash
@@ -243,6 +271,7 @@ sudo ./scripts/manage.sh domain
 sudo ./scripts/manage.sh subscription
 sudo ./scripts/manage.sh xui-subscription
 sudo ./scripts/manage.sh mask-site
+sudo ./scripts/manage.sh protocol-guard
 ```
 
 请只在你有合法授权的服务器和网络环境里使用。

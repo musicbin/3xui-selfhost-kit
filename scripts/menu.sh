@@ -420,6 +420,8 @@ protocol_presets_menu() {
   echo "3. 启用 Trojan WS TLS"
   echo "4. 启用 Shadowsocks 2022"
   echo "5. 配置链式代理出口【socks/http/trojan】"
+  echo "6. 添加 dokodemo-door 转发入站【3X-UI 中显示为 tunnel】"
+  echo "7. 禁用不安全入站协议【vmess/http/mixed/mtproto/tun】"
   echo "0. 返回"
   read -r -p "请选择: " c </dev/tty || c=""
   case "$c" in
@@ -439,6 +441,26 @@ protocol_presets_menu() {
       else
         CHAIN_ENABLED=1 CHAIN_TYPE="${ct:-socks}" CHAIN_ADDRESS="$ca" CHAIN_PORT="$cp" CHAIN_MODE="${cm:-manual}" ./scripts/apply-presets.sh
       fi
+      ;;
+    6)
+      local dl dp da dt dn df
+      read -r -p "监听IP [127.0.0.1，公网转发填0.0.0.0]: " dl </dev/tty || dl=""
+      read -r -p "监听端口 [18080]: " dp </dev/tty || dp=""
+      read -r -p "目标地址 [127.0.0.1]: " da </dev/tty || da=""
+      read -r -p "目标端口 [80]: " dt </dev/tty || dt=""
+      read -r -p "网络 tcp/udp/tcp,udp [tcp]: " dn </dev/tty || dn=""
+      read -r -p "是否 followRedirect 透明转发？[y/N]: " df </dev/tty || df=""
+      ENABLE_DOKODEMO=1 \
+        DOKODEMO_LISTEN="${dl:-127.0.0.1}" \
+        DOKODEMO_PORT="${dp:-18080}" \
+        DOKODEMO_TARGET_ADDRESS="${da:-127.0.0.1}" \
+        DOKODEMO_TARGET_PORT="${dt:-80}" \
+        DOKODEMO_NETWORK="${dn:-tcp}" \
+        DOKODEMO_FOLLOW_REDIRECT="$([ "${df:-n}" = "y" ] && printf 1 || printf 0)" \
+        ./scripts/apply-presets.sh
+      ;;
+    7)
+      PROTOCOL_GUARD_ACTION=disable ./scripts/protocol-guard.sh
       ;;
     *) return 0 ;;
   esac
@@ -602,6 +624,7 @@ show_help() {
   ./scripts/manage.sh domain
   ./scripts/manage.sh subscription
   ./scripts/manage.sh xui-subscription
+  ./scripts/manage.sh protocol-guard
 
 安全建议:
   1. 面板默认绑定 127.0.0.1，通过 SSH 隧道访问。

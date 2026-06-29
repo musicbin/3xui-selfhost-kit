@@ -44,6 +44,7 @@ Commands:
   subscription   Generate local subscription converter web UI
   xui-subscription Configure 3x-ui built-in subscription behind HTTPS
   mask-site      Regenerate the static masquerade site
+  protocol-guard Disable or delete unsafe inbound protocols
 EOF
 }
 
@@ -79,6 +80,9 @@ case "$cmd" in
     docker compose pull 3xui
     docker compose up -d 3xui
     docker exec "$XUI_CONTAINER" /app/x-ui setting -show true >/dev/null
+    if [ "${ENABLE_PROTOCOL_GUARD:-1}" = "1" ] && [ -x ./scripts/protocol-guard.sh ]; then
+      ./scripts/protocol-guard.sh || true
+    fi
     if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && [ -x ./scripts/xui-builtin-subscription.sh ]; then
       ./scripts/xui-builtin-subscription.sh || true
     fi
@@ -138,6 +142,9 @@ case "$cmd" in
     else
       docker compose --profile site up -d caddy-site
     fi
+    ;;
+  protocol-guard)
+    ./scripts/protocol-guard.sh
     ;;
   *)
     usage

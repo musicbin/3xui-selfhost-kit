@@ -11,6 +11,8 @@ OVERRIDE_KEYS=(
   REALITY_PORT REALITY_TARGET REALITY_SERVER_NAMES REALITY_SPIDER_X
   ENABLE_HYSTERIA ENABLE_TROJAN ENABLE_SHADOWSOCKS ALLOW_SELF_SIGNED_TLS
   HYSTERIA_PORT TROJAN_PORT SHADOWSOCKS_PORT TLS_CERT_FILE TLS_KEY_FILE TLS_SERVER_NAME
+  ENABLE_DOKODEMO DOKODEMO_LISTEN DOKODEMO_PORT DOKODEMO_TARGET_ADDRESS DOKODEMO_TARGET_PORT
+  DOKODEMO_NETWORK DOKODEMO_FOLLOW_REDIRECT DOKODEMO_TPROXY
   CHAIN_ENABLED CHAIN_MODE CHAIN_TYPE CHAIN_ADDRESS CHAIN_PORT CHAIN_USER CHAIN_PASS
   CHAIN_SERVER_NAME CHAIN_ALLOW_INSECURE
 )
@@ -552,6 +554,71 @@ write_shadowsocks_optional() {
   } >> runtime/client-links.txt
 }
 
+write_dokodemo_optional() {
+  if [ "${ENABLE_DOKODEMO:-0}" != "1" ]; then
+    return 0
+  fi
+  [ -n "${DOKODEMO_PORT:-}" ] || { echo "ENABLE_DOKODEMO=1 but DOKODEMO_PORT is empty." >&2; return 1; }
+  [ -n "${DOKODEMO_TARGET_ADDRESS:-}" ] || { echo "ENABLE_DOKODEMO=1 but DOKODEMO_TARGET_ADDRESS is empty." >&2; return 1; }
+  [ -n "${DOKODEMO_TARGET_PORT:-}" ] || { echo "ENABLE_DOKODEMO=1 but DOKODEMO_TARGET_PORT is empty." >&2; return 1; }
+
+  local remark file listen network tproxy follow
+  remark="auto-dokodemo-door-${DOKODEMO_PORT}"
+  file="runtime/dokodemo-door.json"
+  listen="${DOKODEMO_LISTEN:-127.0.0.1}"
+  network="${DOKODEMO_NETWORK:-tcp}"
+  tproxy="${DOKODEMO_TPROXY:-off}"
+  follow="${DOKODEMO_FOLLOW_REDIRECT:-0}"
+
+  case "$network" in
+    tcp|udp|tcp,udp) ;;
+    *) echo "DOKODEMO_NETWORK must be tcp, udp, or tcp,udp." >&2; return 1 ;;
+  esac
+
+  jq -n \
+    --arg remark "$remark" \
+    --arg listen "$listen" \
+    --argjson port "$DOKODEMO_PORT" \
+    --arg targetAddress "$DOKODEMO_TARGET_ADDRESS" \
+    --argjson targetPort "$DOKODEMO_TARGET_PORT" \
+    --arg network "$network" \
+    --arg follow "$follow" \
+    --arg tproxy "$tproxy" \
+    '{
+      enable: true,
+      remark: $remark,
+      listen: $listen,
+      port: $port,
+      shareAddr: "",
+      shareAddrStrategy: "listen",
+      protocol: "tunnel",
+      expiryTime: 0,
+      total: 0,
+      trafficReset: "never",
+      settings: {
+        rewriteAddress: $targetAddress,
+        rewritePort: $targetPort,
+        allowedNetwork: $network,
+        followRedirect: ($follow == "1"),
+        portMap: {}
+      },
+      streamSettings: (
+        {security: "none"}
+        | if $tproxy != "" and $tproxy != "off" then .sockopt = {tproxy: $tproxy} else . end
+      ),
+      sniffing: {enabled: false}
+    }' > "$file"
+
+  delete_inbound_by_remark "$remark"
+  add_inbound_if_missing "$remark" "$file"
+
+  {
+    echo "dokodemo-door forwarder (3X-UI protocol: tunnel)"
+    echo "${listen}:${DOKODEMO_PORT} -> ${DOKODEMO_TARGET_ADDRESS}:${DOKODEMO_TARGET_PORT} (${network})"
+    echo
+  } >> runtime/client-links.txt
+}
+
 apply_chain_optional() {
   if [ "${CHAIN_ENABLED:-0}" != "1" ]; then
     return 0
@@ -630,6 +697,7 @@ write_vless_reality
 write_hysteria2_optional
 write_trojan_optional
 write_shadowsocks_optional
+write_dokodemo_optional
 apply_chain_optional
 
 api_get "/panel/api/inbounds/allLinks" 2>/dev/null | jq -r '.obj[]?' > runtime/panel-all-links.txt || true

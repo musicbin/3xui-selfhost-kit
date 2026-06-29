@@ -99,6 +99,7 @@ download_project() {
     "scripts/subscription.sh"
     "scripts/xui-builtin-subscription.sh"
     "scripts/mask-site.sh"
+    "scripts/protocol-guard.sh"
     "scripts/subconfig-api.py"
     "scripts/start-services.sh"
     "scripts/menu.sh"
@@ -145,6 +146,13 @@ configure_firewall_ports() {
   fi
   if [ "${ENABLE_HYSTERIA:-0}" = "1" ]; then
     ports+=("${HYSTERIA_PORT:-8443}/udp")
+  fi
+  if [ "${ENABLE_DOKODEMO:-0}" = "1" ] && [ "${DOKODEMO_LISTEN:-127.0.0.1}" != "127.0.0.1" ] && [ "${DOKODEMO_LISTEN:-127.0.0.1}" != "localhost" ]; then
+    case "${DOKODEMO_NETWORK:-tcp}" in
+      tcp) ports+=("${DOKODEMO_PORT:-18080}/tcp") ;;
+      udp) ports+=("${DOKODEMO_PORT:-18080}/udp") ;;
+      *) ports+=("${DOKODEMO_PORT:-18080}/tcp" "${DOKODEMO_PORT:-18080}/udp") ;;
+    esac
   fi
 
   if command -v ufw >/dev/null 2>&1; then
@@ -224,6 +232,17 @@ configure_xui_builtin_subscription() {
     log "3x-ui built-in subscription setup did not fully complete. Retry later with: cd ${INSTALL_DIR} && ./scripts/manage.sh xui-subscription"
   fi
   load_env
+}
+
+configure_protocol_guard() {
+  load_env
+  if [ "${ENABLE_PROTOCOL_GUARD:-1}" != "1" ]; then
+    return
+  fi
+  log "Disabling unsafe inbound protocols if any exist."
+  if ! (cd "$INSTALL_DIR" && ./scripts/protocol-guard.sh); then
+    log "Protocol guard did not fully complete. Retry later with: cd ${INSTALL_DIR} && ./scripts/manage.sh protocol-guard"
+  fi
 }
 
 install_systemd_autostart() {
@@ -463,6 +482,17 @@ TLS_SERVER_NAME=${TLS_SERVER_NAME:-}
 HYSTERIA_PORT=${HYSTERIA_PORT:-8443}
 TROJAN_PORT=${TROJAN_PORT:-9443}
 SHADOWSOCKS_PORT=${SHADOWSOCKS_PORT:-8388}
+ENABLE_DOKODEMO=${ENABLE_DOKODEMO:-0}
+DOKODEMO_LISTEN=${DOKODEMO_LISTEN:-127.0.0.1}
+DOKODEMO_PORT=${DOKODEMO_PORT:-18080}
+DOKODEMO_TARGET_ADDRESS=${DOKODEMO_TARGET_ADDRESS:-127.0.0.1}
+DOKODEMO_TARGET_PORT=${DOKODEMO_TARGET_PORT:-80}
+DOKODEMO_NETWORK=${DOKODEMO_NETWORK:-tcp}
+DOKODEMO_FOLLOW_REDIRECT=${DOKODEMO_FOLLOW_REDIRECT:-0}
+DOKODEMO_TPROXY=${DOKODEMO_TPROXY:-off}
+SAFE_PROTOCOLS=${SAFE_PROTOCOLS:-vless,trojan,shadowsocks,wireguard,hysteria,tunnel}
+PROTOCOL_GUARD_ACTION=${PROTOCOL_GUARD_ACTION:-disable}
+ENABLE_PROTOCOL_GUARD=${ENABLE_PROTOCOL_GUARD:-1}
 
 CHAIN_ENABLED=${CHAIN_ENABLED:-0}
 CHAIN_MODE=${CHAIN_MODE:-manual}
@@ -631,6 +661,9 @@ write_install_summary() {
   Add an upstream Trojan outbound:
     CHAIN_ENABLED=1 CHAIN_MODE=all CHAIN_TYPE=trojan CHAIN_ADDRESS=upstream.example.com CHAIN_PORT=443 CHAIN_PASS=trojan-password CHAIN_SERVER_NAME=upstream.example.com ./scripts/apply-presets.sh
 
+  Add a dokodemo-door forwarding inbound (3X-UI protocol name: tunnel):
+    ENABLE_DOKODEMO=1 DOKODEMO_LISTEN=127.0.0.1 DOKODEMO_PORT=18080 DOKODEMO_TARGET_ADDRESS=127.0.0.1 DOKODEMO_TARGET_PORT=80 DOKODEMO_NETWORK=tcp ./scripts/apply-presets.sh
+
 7) Manage
   cd ${INSTALL_DIR}
   x-ui
@@ -734,6 +767,7 @@ main() {
     fi
   fi
 
+  configure_protocol_guard
   configure_subscription
   configure_xui_builtin_subscription
 
