@@ -730,6 +730,28 @@ apply_chain_optional() {
   echo "Chain outbound added: $tag"
 }
 
+write_panel_links() {
+  local links_file="runtime/panel-all-links.txt"
+  local resp emails email encoded client_resp
+  : > "$links_file"
+
+  resp="$(api_get "/panel/api/inbounds/allLinks" 2>/dev/null || true)"
+  if printf '%s' "$resp" | jq -e '.success == true and (.obj | length > 0)' >/dev/null 2>&1; then
+    printf '%s' "$resp" | jq -r '.obj[]?' > "$links_file"
+    return 0
+  fi
+
+  emails="$(api_get "/panel/api/inbounds/list" \
+    | jq -r '.obj[]?.settings.clients[]?.email // empty' \
+    | awk 'NF && !seen[$0]++')"
+  while IFS= read -r email; do
+    [ -n "$email" ] || continue
+    encoded="$(jq -rn --arg v "$email" '$v|@uri')"
+    client_resp="$(api_get "/panel/api/clients/links/${encoded}" 2>/dev/null || true)"
+    printf '%s' "$client_resp" | jq -r '.obj[]?' >> "$links_file" 2>/dev/null || true
+  done <<< "$emails"
+}
+
 : > runtime/client-links.txt
 wait_api
 write_vless_reality
@@ -739,7 +761,7 @@ write_shadowsocks_optional
 write_dokodemo_optional
 apply_chain_optional
 
-api_get "/panel/api/inbounds/allLinks" 2>/dev/null | jq -r '.obj[]?' > runtime/panel-all-links.txt || true
+write_panel_links
 chmod 600 runtime/panel-all-links.txt 2>/dev/null || true
 
 api_post_form "/panel/api/server/restartXrayService" | jq . || true
