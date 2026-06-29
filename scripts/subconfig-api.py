@@ -5,7 +5,7 @@ import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, quote, unquote, urlparse, urlunparse
+from urllib.parse import parse_qs, parse_qsl, quote, urlencode, unquote, urlparse, urlunparse
 from urllib.request import Request, urlopen
 import base64
 import json
@@ -293,7 +293,15 @@ def replace_link_host(link, host):
         fragment += suffix
     elif not fragment:
         fragment = host
-    return urlunparse((parsed.scheme, netloc, parsed.path, parsed.params, parsed.query, quote(fragment, safe="")))
+    query = parsed.query
+    if parsed.scheme.lower() == "trojan":
+        query_items = []
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True):
+            if key in ("sni", "host"):
+                value = host
+            query_items.append((key, value))
+        query = urlencode(query_items)
+    return urlunparse((parsed.scheme, netloc, parsed.path, parsed.params, query, quote(fragment, safe="")))
 
 
 def unique_links(links):
