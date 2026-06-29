@@ -100,8 +100,15 @@ rules:
 EOF
   fi
 
-  if [ -s runtime/client-links.txt ]; then
-    awk '/^(vless|vmess|trojan|ss|hysteria2):\/\// { print }' runtime/client-links.txt > "site/subscriptions/${SUBSCRIPTION_TOKEN}.txt"
+  local links_source=""
+  if [ -s runtime/panel-all-links.txt ]; then
+    links_source="runtime/panel-all-links.txt"
+  elif [ -s runtime/client-links.txt ]; then
+    links_source="runtime/client-links.txt"
+  fi
+
+  if [ -n "$links_source" ]; then
+    awk '/^(vless|vmess|trojan|ss|hysteria2):\/\// { print }' "$links_source" > "site/subscriptions/${SUBSCRIPTION_TOKEN}.txt"
     if command -v base64 >/dev/null 2>&1 && base64 --help 2>&1 | grep -q -- '-w'; then
       base64 -w0 "site/subscriptions/${SUBSCRIPTION_TOKEN}.txt" > "site/subscriptions/${SUBSCRIPTION_TOKEN}.b64"
     else
