@@ -656,6 +656,33 @@ write_dokodemo_optional() {
       echo
     } >> runtime/client-links.txt
   fi
+
+  ensure_dokodemo_direct_route "$network"
+}
+
+ensure_dokodemo_direct_route() {
+  local network="$1"
+  local resp template new tmp_out tag
+  tag="in-${DOKODEMO_PORT}-${network}"
+  resp="$(api_post_form "/panel/api/xray/")"
+  template="$(printf '%s' "$resp" | jq -r '.obj' | jq '.xraySetting')"
+  new="$(jq --arg tag "$tag" '
+    def has_tag:
+      (.inboundTag // []) as $tags
+      | if ($tags | type) == "array" then ($tags | index($tag)) != null else $tags == $tag end;
+    .routing = (.routing // {})
+    | .routing.rules = (
+        [{type:"field", inboundTag:[$tag], outboundTag:"direct"}]
+        + ((.routing.rules // []) | map(select(has_tag | not)))
+      )
+  ' <<<"$template")"
+
+  tmp_out="runtime/xray-with-dokodemo-route.json"
+  printf '%s\n' "$new" > "$tmp_out"
+  api_post_form "/panel/api/xray/update" \
+    --data-urlencode "xraySetting=$(cat "$tmp_out")" \
+    --data-urlencode "outboundTestUrl=https://www.google.com/generate_204" | jq .
+  echo "Dokodemo-door direct route ensured: ${tag} -> direct"
 }
 
 apply_chain_optional() {
