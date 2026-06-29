@@ -121,6 +121,49 @@ truthy() {
   esac
 }
 
+write_builtin_client_links() {
+  local token="$1"
+  local base="$2"
+  local sub_uri="$3"
+  local json_uri="$4"
+  local clash_uri="$5"
+  local sub_path="$6"
+  local json_path="$7"
+  local clash_path="$8"
+
+  [ -n "$sub_uri" ] || sub_uri="http://${XUI_BUILTIN_SUB_LISTEN}:${XUI_BUILTIN_SUB_PORT}${sub_path}"
+  [ -n "$json_uri" ] || json_uri="http://${XUI_BUILTIN_SUB_LISTEN}:${XUI_BUILTIN_SUB_PORT}${json_path}"
+  [ -n "$clash_uri" ] || clash_uri="http://${XUI_BUILTIN_SUB_LISTEN}:${XUI_BUILTIN_SUB_PORT}${clash_path}"
+
+  curl -fsS --connect-timeout 3 --max-time 30 \
+    -H "Authorization: Bearer ${token}" \
+    "${base%/}/panel/api/inbounds/list" > runtime/xui-builtin-inbounds.json
+
+  jq -r \
+    --arg subUri "$sub_uri" \
+    --arg jsonUri "$json_uri" \
+    --arg clashUri "$clash_uri" \
+    --argjson jsonEnable "$(truthy "$XUI_BUILTIN_JSON_ENABLE")" \
+    --argjson clashEnable "$(truthy "$XUI_BUILTIN_CLASH_ENABLE")" '
+    def settings_obj:
+      if (.settings | type) == "string" then (.settings | fromjson? // {}) else (.settings // {}) end;
+    [
+      .obj[]? as $inbound
+      | ($inbound | settings_obj | .clients // [])[]?
+      | select((.subId // "") != "")
+      | "client: \(.email // "unknown")",
+        "  sub: \($subUri)\(.subId)",
+        (if $jsonEnable then "  json: \($jsonUri)\(.subId)" else empty end),
+        (if $clashEnable then "  clash: \($clashUri)\(.subId)" else empty end)
+    ] | .[]
+  ' runtime/xui-builtin-inbounds.json > runtime/xui-builtin-sub-links.txt
+
+  if [ ! -s runtime/xui-builtin-sub-links.txt ]; then
+    printf 'No enabled clients with subId were found yet.\n' > runtime/xui-builtin-sub-links.txt
+  fi
+  chmod 600 runtime/xui-builtin-sub-links.txt
+}
+
 configure_panel_subscription() {
   [ "$XUI_BUILTIN_SUB_ENABLE" = "1" ] || { log "Built-in 3x-ui subscription is disabled."; return 0; }
 
@@ -186,31 +229,47 @@ configure_panel_subscription() {
     "${base%/}/panel/api/setting/update" > runtime/xui-setting-update-response.json
 
   jq -e '.success == true' runtime/xui-setting-update-response.json >/dev/null
+  write_builtin_client_links "$token" "$base" "$sub_uri" "$json_uri" "$clash_uri" "$sub_path" "$json_path" "$clash_path"
   log "3x-ui built-in subscription base: ${sub_uri:-local-only at ${XUI_BUILTIN_SUB_LISTEN}:${XUI_BUILTIN_SUB_PORT}${sub_path}}"
+  log "3x-ui built-in client links: ${ROOT_DIR}/runtime/xui-builtin-sub-links.txt"
 }
 
-caddy_path_args() {
+caddy_base_path_args() {
   local sub_path json_path clash_path
   sub_path="$(normalize_path "${XUI_BUILTIN_SUB_PATH:-}")"
   json_path="$(normalize_path "${XUI_BUILTIN_JSON_PATH:-}")"
   clash_path="$(normalize_path "${XUI_BUILTIN_CLASH_PATH:-}")"
-  printf '%s %s/* %s %s/* %s %s/*' \
-    "${sub_path%/}" "${sub_path%/}" \
-    "${json_path%/}" "${json_path%/}" \
-    "${clash_path%/}" "${clash_path%/}"
+  printf '%s %s %s %s %s %s' \
+    "${sub_path%/}" "$sub_path" \
+    "${json_path%/}" "$json_path" \
+    "${clash_path%/}" "$clash_path"
+}
+
+caddy_subid_path_args() {
+  local sub_path json_path clash_path
+  sub_path="$(normalize_path "${XUI_BUILTIN_SUB_PATH:-}")"
+  json_path="$(normalize_path "${XUI_BUILTIN_JSON_PATH:-}")"
+  clash_path="$(normalize_path "${XUI_BUILTIN_CLASH_PATH:-}")"
+  printf '%s/* %s/* %s/*' \
+    "${sub_path%/}" "${json_path%/}" "${clash_path%/}"
 }
 
 upsert_caddy_proxy() {
   [ "$HTTPS_SITE_ENABLE" = "1" ] || return 0
   [ -f caddy/Caddyfile ] || return 0
 
-  local tmp block paths
+  local tmp block base_paths subid_paths
   tmp="$(mktemp)"
   block="$(mktemp)"
-  paths="$(caddy_path_args)"
+  base_paths="$(caddy_base_path_args)"
+  subid_paths="$(caddy_subid_path_args)"
   cat > "$block" <<EOF
 	# 3xui builtin subscription start
-	@xuiBuiltinSub path ${paths}
+	@xuiBuiltinSubBase path ${base_paths}
+	handle @xuiBuiltinSubBase {
+		redir /sub/ 308
+	}
+	@xuiBuiltinSub path ${subid_paths}
 	handle @xuiBuiltinSub {
 		reverse_proxy 127.0.0.1:${XUI_BUILTIN_SUB_PORT}
 	}

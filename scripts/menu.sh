@@ -265,7 +265,9 @@ write_runtime_summary() {
 
 9) 3X-UI built-in subscription
   Listen: ${XUI_BUILTIN_SUB_LISTEN:-127.0.0.1}:${XUI_BUILTIN_SUB_PORT:-2096}
-  Subscription URI: $(web_origin)${XUI_BUILTIN_SUB_PATH:-/xui-sub/}
+  Subscription prefix: $(web_origin)${XUI_BUILTIN_SUB_PATH:-/xui-sub/}
+  Actual links require a client subId. Generated list:
+    ${ROOT_DIR}/runtime/xui-builtin-sub-links.txt
   JSON URI: $(web_origin)${XUI_BUILTIN_JSON_PATH:-/xui-json/}
   Clash URI: $(web_origin)${XUI_BUILTIN_CLASH_PATH:-/xui-clash/}
 EOF
@@ -335,7 +337,14 @@ show_status() {
   echo "订阅转换: ${blue}$(web_origin)/sub/ ${plain}"
   echo "规则配置: ${blue}$(web_origin)/sub/config/3.5.yaml${plain}"
   echo "规则编辑Token: ${blue}${SUB_CONFIG_ADMIN_TOKEN:-未生成}${plain}"
-  echo "3X-UI内置订阅: ${blue}$(web_origin)${XUI_BUILTIN_SUB_PATH:-/xui-sub/}${plain}  监听: ${cyan}${XUI_BUILTIN_SUB_LISTEN}:${XUI_BUILTIN_SUB_PORT}${plain}"
+  echo "3X-UI内置订阅前缀: ${blue}$(web_origin)${XUI_BUILTIN_SUB_PATH:-/xui-sub/}${plain}  监听: ${cyan}${XUI_BUILTIN_SUB_LISTEN}:${XUI_BUILTIN_SUB_PORT}${plain}"
+  echo "说明: ${yellow}内置订阅必须追加客户端 subId；直接打开前缀会跳转到 /sub/。${plain}"
+  if [ -s runtime/xui-builtin-sub-links.txt ]; then
+    echo "3X-UI内置订阅客户端链接:"
+    sed 's/^/  /' runtime/xui-builtin-sub-links.txt | head -30
+  else
+    echo "3X-UI内置订阅客户端链接: ${yellow}${ROOT_DIR}/runtime/xui-builtin-sub-links.txt 尚未生成，运行菜单 15 修复。${plain}"
+  fi
 }
 
 show_menu() {

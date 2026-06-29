@@ -309,6 +309,12 @@ cd /opt/3xui-selfhost-kit
 sudo ./scripts/manage.sh refresh-links
 ```
 
+## 3X-UI 内置订阅路径
+
+3X-UI 官方内置订阅的有效格式是“随机前缀 + 客户端 subId”。例如 `/xui-sub-xxxx/<subId>` 才是可用订阅；只打开 `/xui-sub-xxxx/` 没有客户端上下文，官方服务会返回 404。
+
+本项目会把基础路径自动跳转到 `/sub/`，并在 `x-ui` 命令行和 `runtime/xui-builtin-sub-links.txt` 里显示真实客户端链接。
+
 ## 常用命令
 
 ```bash
