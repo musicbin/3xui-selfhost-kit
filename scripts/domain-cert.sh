@@ -130,13 +130,13 @@ write_caddyfile() {
 	redir @panelRoot /${panel_path}/ 308
 	@panelPath path /${panel_path}/*
 	handle @panelPath {
-		reverse_proxy host.docker.internal:${PANEL_PORT:-2053}
+		reverse_proxy 127.0.0.1:${PANEL_PORT:-2053}
 	}
 	handle_path /subconverter/* {
-		reverse_proxy subconverter:25500
+		reverse_proxy 127.0.0.1:${SUBCONVERTER_PORT:-25500}
 	}
 	handle_path /subconfig-api/* {
-		reverse_proxy subconfig-api:27880
+		reverse_proxy 127.0.0.1:${SUB_CONFIG_PORT:-27880}
 	}
 	root * /usr/share/caddy
 	file_server
@@ -163,10 +163,10 @@ EOF
     cat > caddy/Caddyfile <<'EOF'
 :80 {
 	handle_path /subconverter/* {
-		reverse_proxy subconverter:25500
+		reverse_proxy 127.0.0.1:${SUBCONVERTER_PORT:-25500}
 	}
 	handle_path /subconfig-api/* {
-		reverse_proxy subconfig-api:27880
+		reverse_proxy 127.0.0.1:${SUB_CONFIG_PORT:-27880}
 	}
 	root * /usr/share/caddy
 	file_server
@@ -310,6 +310,24 @@ web_origin() {
   fi
 }
 
+secure_panel_for_https() {
+  if [ "${HTTPS_SITE_ENABLE:-0}" != "1" ]; then
+    return
+  fi
+  set_env_var PANEL_LISTEN_IP "127.0.0.1"
+  PANEL_LISTEN_IP="127.0.0.1"
+  if docker inspect "$XUI_CONTAINER" >/dev/null 2>&1; then
+    docker exec "$XUI_CONTAINER" /app/x-ui setting \
+      -port "${PANEL_PORT:-2053}" \
+      -listenIP "127.0.0.1" \
+      -username "${PANEL_USERNAME:-admin}" \
+      -password "${PANEL_PASSWORD:-}" \
+      -webBasePath "${WEB_BASE_PATH#/}" >/dev/null || true
+    docker restart "$XUI_CONTAINER" >/dev/null || true
+    sleep 5
+  fi
+}
+
 main() {
   local domains="${DOMAIN_NAMES:-}"
   local primary email
@@ -356,6 +374,7 @@ main() {
   fi
 
   configure_firewall_ports
+  secure_panel_for_https
 
   if [ "${APPLY_AFTER_DOMAIN:-1}" = "1" ] && docker inspect "$XUI_CONTAINER" >/dev/null 2>&1; then
     ENABLE_TROJAN="${ENABLE_TROJAN:-0}" ./scripts/apply-presets.sh || true
