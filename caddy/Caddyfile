@@ -6,9 +6,13 @@
 		reverse_proxy 127.0.0.1:27880
 	}
 	@yamlConfig path /sub/config/*.yaml /sub/config/*.yml
-	header @yamlConfig {
-		Content-Type "text/yaml; charset=utf-8"
-		defer
+	handle @yamlConfig {
+		header {
+			Content-Type "text/yaml; charset=utf-8"
+			defer
+		}
+		root * /usr/share/caddy
+		file_server
 	}
 	root * /usr/share/caddy
 	file_server
