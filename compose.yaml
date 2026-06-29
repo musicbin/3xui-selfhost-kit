@@ -48,6 +48,8 @@ services:
     container_name: ${CADDY_CONTAINER:-3xui_site}
     profiles:
       - site
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${SITE_HTTP_PORT:-80}:80"
     volumes:
@@ -63,6 +65,8 @@ services:
     container_name: ${CADDY_HTTPS_CONTAINER:-3xui_https_site}
     profiles:
       - https-site
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${SITE_HTTP_PORT:-80}:80"
       - "${SITE_HTTPS_PORT:-443}:443"

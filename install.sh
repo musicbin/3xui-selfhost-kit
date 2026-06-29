@@ -539,6 +539,9 @@ write_install_summary() {
   local public_panel_url="http://${SERVER_ADDR:-your-server}:${PANEL_PORT:-2053}/${WEB_BASE_PATH:-panel}/"
   local tunnel_cmd="ssh -L ${PANEL_PORT:-2053}:127.0.0.1:${PANEL_PORT:-2053} root@${SERVER_ADDR:-your-server}"
   local tunnel_panel_url="http://127.0.0.1:${PANEL_PORT:-2053}/${WEB_BASE_PATH:-panel}/"
+  if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
+    public_panel_url="https://${SERVER_ADDR:-your-server}/${WEB_BASE_PATH:-panel}/"
+  fi
   mkdir -p "${INSTALL_DIR}/runtime"
   chmod 700 "${INSTALL_DIR}/runtime"
   cat > "$summary" <<EOF

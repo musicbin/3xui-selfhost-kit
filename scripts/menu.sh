@@ -141,7 +141,11 @@ autostart_status() {
 }
 
 panel_url() {
-  printf 'http://%s:%s/%s/' "$SERVER_ADDR" "$PANEL_PORT" "${WEB_BASE_PATH#/}"
+  if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
+    printf '%s/%s/' "$(web_origin)" "${WEB_BASE_PATH#/}"
+  else
+    printf 'http://%s:%s/%s/' "$SERVER_ADDR" "$PANEL_PORT" "${WEB_BASE_PATH#/}"
+  fi
 }
 
 tunnel_url() {

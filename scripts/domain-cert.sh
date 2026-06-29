@@ -116,14 +116,22 @@ EOF
 
 write_caddyfile() {
   mkdir -p caddy
+  local panel_path="${WEB_BASE_PATH:-panel}"
+  panel_path="${panel_path#/}"
   if [ "${TLS_CERT_FILE:-}" != "" ] && [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
-    cat > caddy/Caddyfile <<'EOF'
+    cat > caddy/Caddyfile <<EOF
 :80 {
 	redir https://{host}{uri} 308
 }
 
 :443 {
 	tls /cert/domains/fullchain.pem /cert/domains/privkey.pem
+	@panelRoot path /${panel_path}
+	redir @panelRoot /${panel_path}/ 308
+	@panelPath path /${panel_path}/*
+	handle @panelPath {
+		reverse_proxy host.docker.internal:${PANEL_PORT:-2053}
+	}
 	handle_path /subconverter/* {
 		reverse_proxy subconverter:25500
 	}
@@ -267,6 +275,10 @@ configure_firewall_ports() {
     for p in "${ports[@]}"; do
       ufw allow "$p" >/dev/null 2>&1 || true
     done
+    if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
+      ufw delete allow "${PANEL_PORT:-2053}/tcp" >/dev/null 2>&1 || true
+      ufw deny "${PANEL_PORT:-2053}/tcp" >/dev/null 2>&1 || true
+    fi
     log "Firewall rules ensured with ufw: ${ports[*]}"
   elif command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active firewalld >/dev/null 2>&1; then
     local p proto port
