@@ -157,6 +157,8 @@ ${xui_sub_block}
 	handle_path /subconfig-api/* {
 		reverse_proxy 127.0.0.1:${SUB_CONFIG_PORT:-27880}
 	}
+	@yamlConfig path /sub/config/*.yaml /sub/config/*.yml
+	header @yamlConfig Content-Type "text/yaml; charset=utf-8"
 	root * /usr/share/caddy
 	file_server
 	header {
@@ -187,6 +189,8 @@ EOF
 	handle_path /subconfig-api/* {
 		reverse_proxy 127.0.0.1:${SUB_CONFIG_PORT:-27880}
 	}
+	@yamlConfig path /sub/config/*.yaml /sub/config/*.yml
+	header @yamlConfig Content-Type "text/yaml; charset=utf-8"
 	root * /usr/share/caddy
 	file_server
 	header {
