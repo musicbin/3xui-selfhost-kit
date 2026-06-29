@@ -1,4 +1,10 @@
 :80 {
+	handle_path /subconverter/* {
+		reverse_proxy subconverter:25500
+	}
+	handle_path /subconfig-api/* {
+		reverse_proxy subconfig-api:27880
+	}
 	root * /usr/share/caddy
 	file_server
 	header {
@@ -6,4 +12,3 @@
 		Referrer-Policy no-referrer
 	}
 }
-

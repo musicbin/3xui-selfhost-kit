@@ -30,6 +30,18 @@ REALITY_PORT="${REALITY_PORT:-443}"
 REALITY_TARGET="${REALITY_TARGET:-www.cloudflare.com:443}"
 REALITY_SERVER_NAMES="${REALITY_SERVER_NAMES:-www.cloudflare.com,cloudflare.com}"
 AUTOSTART_SERVICE="${AUTOSTART_SERVICE:-3xui-kit.service}"
+DOMAIN_NAMES="${DOMAIN_NAMES:-}"
+TLS_CERT_FILE="${TLS_CERT_FILE:-}"
+TLS_KEY_FILE="${TLS_KEY_FILE:-}"
+TLS_SERVER_NAME="${TLS_SERVER_NAME:-}"
+ACME_EMAIL="${ACME_EMAIL:-}"
+ENABLE_SUBCONVERTER="${ENABLE_SUBCONVERTER:-1}"
+SUBSCRIPTION_TOKEN="${SUBSCRIPTION_TOKEN:-}"
+SUB_CONFIG_ADMIN_TOKEN="${SUB_CONFIG_ADMIN_TOKEN:-}"
+SITE_HTTP_PORT="${SITE_HTTP_PORT:-80}"
+SITE_HTTPS_PORT="${SITE_HTTPS_PORT:-443}"
+HTTPS_SITE_ENABLE="${HTTPS_SITE_ENABLE:-0}"
+HTTPS_HTTP_MODE="${HTTPS_HTTP_MODE:-reject}"
 
 green=$'\033[0;32m'
 cyan=$'\033[0;36m'
@@ -53,7 +65,7 @@ pause() {
 
 need_root_hint() {
   if [ "$(id -u)" -ne 0 ]; then
-    echo "${yellow}提示：部分 Docker/面板操作需要 sudo。建议使用：sudo 3xui-kit${plain}"
+    echo "${yellow}提示：部分 Docker/面板操作需要 sudo。建议使用：sudo x-ui${plain}"
   fi
 }
 
@@ -140,6 +152,22 @@ tunnel_cmd() {
   printf 'ssh -L %s:127.0.0.1:%s root@%s' "$PANEL_PORT" "$PANEL_PORT" "$SERVER_ADDR"
 }
 
+web_origin() {
+  if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
+    if [ "${SITE_HTTPS_PORT:-443}" = "443" ]; then
+      printf 'https://%s' "$SERVER_ADDR"
+    else
+      printf 'https://%s:%s' "$SERVER_ADDR" "$SITE_HTTPS_PORT"
+    fi
+  else
+    if [ "${SITE_HTTP_PORT:-80}" = "80" ]; then
+      printf 'http://%s' "$SERVER_ADDR"
+    else
+      printf 'http://%s:%s' "$SERVER_ADDR" "$SITE_HTTP_PORT"
+    fi
+  fi
+}
+
 refresh_env() {
   if [ -f .env ]; then
     set -a
@@ -208,6 +236,20 @@ write_runtime_summary() {
   systemd service: ${AUTOSTART_SERVICE}
   Check status:
     systemctl status ${AUTOSTART_SERVICE} --no-pager
+
+7) Domains and HTTPS
+  Domains: ${DOMAIN_NAMES:-not configured}
+  TLS cert: ${TLS_CERT_FILE:-not configured}
+  TLS key: ${TLS_KEY_FILE:-not configured}
+  HTTPS site: ${HTTPS_SITE_ENABLE:-0}
+  HTTP mode: ${HTTPS_HTTP_MODE:-reject}
+
+8) Subscription converter
+  Web UI: $(web_origin)/sub/
+  Local node subscription: $(web_origin)/subscriptions/${SUBSCRIPTION_TOKEN:-token}.txt
+  Default local conversion config: $(web_origin)/sub/config/3.5.yaml
+  Rules editor token: ${SUB_CONFIG_ADMIN_TOKEN:-not generated yet}
+  Note: If HTTPS_SITE_ENABLE=0 and HTTPS_HTTP_MODE=reject, public /sub/ is intentionally blocked after certificate setup.
 EOF
   chmod 600 runtime/install-summary.txt
 }
@@ -215,7 +257,7 @@ EOF
 show_header() {
   clear 2>/dev/null || true
   warn_line
-  echo "${cyan}3x-ui 自用部署管理脚本${plain}    快捷方式：${yellow}3xui-kit${plain}"
+  echo "${cyan}3x-ui 自用部署管理脚本${plain}    快捷方式：${yellow}x-ui${plain}"
   warn_line
   echo "${green} 1. 一键安装 / 启动 3x-ui 官方镜像${plain}"
   echo "${green} 2. 删除卸载 3x-ui${plain}"
@@ -227,10 +269,12 @@ show_header() {
   echo "${green} 7. 更新官方 3x-ui 镜像并重启${plain}"
   echo "${green} 8. 备份数据库和 .env 配置${plain}"
   echo "${green} 9. 查看 3x-ui 日志${plain}"
-  echo "${green}10. 启动 / 更新 80 端口伪装静态站点${plain}"
-  echo "${green}11. 刷新并显示节点链接${plain}"
-  echo "${green}12. 显示使用说明和安全建议${plain}"
+  echo "${green}10. 管理 Acme 申请域名证书【支持多域名 / 自动续期】${plain}"
+  echo "${green}11. 启动 / 更新 80 端口伪装静态站点${plain}"
+  echo "${green}12. 刷新IP配置及参数显示 / 节点链接${plain}"
   echo "${green}13. 开机自启动设置【启用/禁用/查看】${plain}"
+  echo "${green}14. 显示使用说明和安全建议${plain}"
+  echo "${green}15. 订阅转换 Web 界面【ACL4SSR / Clash / sing-box】${plain}"
   line
   echo "${green} 0. 退出脚本${plain}"
   warn_line
@@ -263,6 +307,12 @@ show_status() {
   echo "REALITY目标: ${blue}${REALITY_TARGET}${plain}"
   echo "客户端链接: ${blue}${ROOT_DIR}/runtime/client-links.txt${plain}"
   echo "面板导出链接: ${blue}${ROOT_DIR}/runtime/panel-all-links.txt${plain}"
+  echo "绑定域名: ${blue}${DOMAIN_NAMES:-未配置}${plain}"
+  echo "TLS证书: ${blue}${TLS_CERT_FILE:-未配置}${plain}"
+  echo "HTTPS站点: ${blue}${HTTPS_SITE_ENABLE:-0}${plain}  HTTP模式: ${blue}${HTTPS_HTTP_MODE:-reject}${plain}"
+  echo "订阅转换: ${blue}$(web_origin)/sub/ ${plain}"
+  echo "规则配置: ${blue}$(web_origin)/sub/config/3.5.yaml${plain}"
+  echo "规则编辑Token: ${blue}${SUB_CONFIG_ADMIN_TOKEN:-未生成}${plain}"
 }
 
 show_menu() {
@@ -351,7 +401,7 @@ protocol_presets_menu() {
   echo "2. 启用 Hysteria2"
   echo "3. 启用 Trojan WS TLS"
   echo "4. 启用 Shadowsocks 2022"
-  echo "5. 配置链式代理出口"
+  echo "5. 配置链式代理出口【socks/http/trojan】"
   echo "0. 返回"
   read -r -p "请选择: " c </dev/tty || c=""
   case "$c" in
@@ -360,14 +410,50 @@ protocol_presets_menu() {
     3) ENABLE_TROJAN=1 ./scripts/apply-presets.sh ;;
     4) ENABLE_SHADOWSOCKS=1 ./scripts/apply-presets.sh ;;
     5)
-      read -r -p "上游类型 socks/http [socks]: " ct </dev/tty || ct=""
+      read -r -p "上游类型 socks/http/trojan [socks]: " ct </dev/tty || ct=""
       read -r -p "上游地址: " ca </dev/tty || ca=""
       read -r -p "上游端口: " cp </dev/tty || cp=""
       read -r -p "路由模式 manual/all [manual]: " cm </dev/tty || cm=""
-      CHAIN_ENABLED=1 CHAIN_TYPE="${ct:-socks}" CHAIN_ADDRESS="$ca" CHAIN_PORT="$cp" CHAIN_MODE="${cm:-manual}" ./scripts/apply-presets.sh
+      if [ "${ct:-socks}" = "trojan" ]; then
+        read -r -p "Trojan密码: " cpass </dev/tty || cpass=""
+        read -r -p "Trojan SNI/域名 [${ca}]: " csni </dev/tty || csni=""
+        CHAIN_ENABLED=1 CHAIN_TYPE=trojan CHAIN_ADDRESS="$ca" CHAIN_PORT="$cp" CHAIN_PASS="$cpass" CHAIN_SERVER_NAME="${csni:-$ca}" CHAIN_MODE="${cm:-manual}" ./scripts/apply-presets.sh
+      else
+        CHAIN_ENABLED=1 CHAIN_TYPE="${ct:-socks}" CHAIN_ADDRESS="$ca" CHAIN_PORT="$cp" CHAIN_MODE="${cm:-manual}" ./scripts/apply-presets.sh
+      fi
       ;;
     *) return 0 ;;
   esac
+}
+
+domain_cert_menu() {
+  local domains email use_domain enable_trojan https_site
+  echo "${cyan}Acme 域名证书 / HTTPS / Trojan TLS 自动配置${plain}"
+  echo "当前域名: ${DOMAIN_NAMES:-未配置}"
+  echo "当前证书: ${TLS_CERT_FILE:-未配置}"
+  echo
+  read -r -p "请输入域名，可多个，用逗号或空格分隔 [${DOMAIN_NAMES:-}]: " domains </dev/tty || domains=""
+  domains="${domains:-${DOMAIN_NAMES:-}}"
+  if [ -z "$domains" ]; then
+    echo "${yellow}未输入域名。${plain}"
+    return 0
+  fi
+  read -r -p "ACME邮箱 [${ACME_EMAIL:-admin@${domains%%,*}}]: " email </dev/tty || email=""
+  read -r -p "是否用第一个域名作为节点/面板显示地址？[Y/n]: " use_domain </dev/tty || use_domain=""
+  read -r -p "证书成功后是否自动启用 Trojan TLS 节点？[Y/n]: " enable_trojan </dev/tty || enable_trojan=""
+  read -r -p "是否启用 443 HTTPS 伪装站点？会把 Reality 默认端口从443改到8443 [Y/n]: " https_site </dev/tty || https_site=""
+
+  set_env_var DOMAIN_NAMES "$domains"
+  set_env_var ACME_EMAIL "${email:-${ACME_EMAIL:-admin@${domains%%,*}}}"
+  set_env_var ENABLE_ACME "1"
+  case "$use_domain" in n|N|no|NO|No) set_env_var USE_DOMAIN_FOR_LINKS "0" ;; *) set_env_var USE_DOMAIN_FOR_LINKS "1" ;; esac
+  case "$enable_trojan" in n|N|no|NO|No) set_env_var AUTO_ENABLE_TROJAN "0" ;; *) set_env_var AUTO_ENABLE_TROJAN "1"; set_env_var ENABLE_TROJAN "1" ;; esac
+  case "$https_site" in n|N|no|NO|No) set_env_var HTTPS_SITE_ENABLE "0"; set_env_var HTTPS_HTTP_MODE "reject" ;; *) set_env_var HTTPS_SITE_ENABLE "1"; set_env_var HTTPS_HTTP_MODE "redirect" ;; esac
+
+  refresh_env
+  ./scripts/domain-cert.sh
+  refresh_env
+  write_runtime_summary
 }
 
 service_menu() {
@@ -388,7 +474,7 @@ require_root_for_autostart() {
   if [ "$(id -u)" -eq 0 ]; then
     return 0
   fi
-  echo "${red}自启动服务写入 /etc/systemd/system，需要 root 权限。请使用：sudo 3xui-kit${plain}"
+  echo "${red}自启动服务写入 /etc/systemd/system，需要 root 权限。请使用：sudo x-ui${plain}"
   return 1
 }
 
@@ -416,8 +502,8 @@ Requires=docker.service
 [Service]
 Type=oneshot
 WorkingDirectory=${ROOT_DIR}
-ExecStart=${docker_bin} compose up -d 3xui
-ExecStop=${docker_bin} compose stop 3xui
+ExecStart=/usr/bin/env bash ${ROOT_DIR}/scripts/start-services.sh
+ExecStop=${docker_bin} compose stop 3xui subconverter subconfig-api caddy-site caddy-https
 RemainAfterExit=yes
 TimeoutStartSec=0
 
@@ -466,9 +552,23 @@ autostart_menu() {
   esac
 }
 
+subscription_menu() {
+  echo "${cyan}订阅转换 Web 界面${plain}"
+  if [ "${ENABLE_SUBCONVERTER:-1}" != "1" ]; then
+    echo "${yellow}ENABLE_SUBCONVERTER=0，当前未启用。${plain}"
+    read -r -p "是否启用订阅转换？[Y/n]: " yn </dev/tty || yn=""
+    case "$yn" in n|N|no|NO|No) return 0 ;; esac
+    set_env_var ENABLE_SUBCONVERTER "1"
+  fi
+  ./scripts/subscription.sh
+  refresh_env
+  write_runtime_summary
+}
+
 show_help() {
   cat <<EOF
 常用命令:
+  x-ui
   3xui-kit
   cd ${ROOT_DIR}
   ./scripts/manage.sh status
@@ -476,12 +576,16 @@ show_help() {
   ./scripts/manage.sh update
   ./scripts/manage.sh backup
   ./scripts/manage.sh autostart
+  ./scripts/manage.sh domain
+  ./scripts/manage.sh subscription
 
 安全建议:
   1. 面板默认绑定 127.0.0.1，通过 SSH 隧道访问。
   2. 公网只开放 ${REALITY_PORT}/tcp 给 VLESS REALITY。
   3. 不要把 .env、install-summary.txt、订阅链接发给别人。
   4. Trojan/Hysteria2 建议使用真实可信 TLS 证书。
+  5. 输入域名申请证书前，请先把域名 A 记录解析到当前 VPS 公网 IP。
+  6. 配置 HTTPS 证书后，80 端口默认拒绝 HTTP 明文访问；只有手动选择 HTTPS 伪装站点时才跳转到 HTTPS。
 
 自启动:
   1. Docker Compose 已设置 restart: unless-stopped。
@@ -494,7 +598,7 @@ main_loop() {
   while true; do
     refresh_env
     show_menu
-    read -r -p "请输入选项 [0-13]: " choice </dev/tty || choice="0"
+    read -r -p "请输入选项 [0-15]: " choice </dev/tty || choice="0"
     case "$choice" in
       1) install_or_start; pause ;;
       2) uninstall_xui; pause ;;
@@ -505,10 +609,12 @@ main_loop() {
       7) ./scripts/manage.sh update; pause ;;
       8) ./scripts/manage.sh backup; pause ;;
       9) docker compose logs --tail=200 3xui; pause ;;
-      10) docker compose --profile site up -d caddy-site; pause ;;
-      11) ./scripts/apply-presets.sh; show_links; pause ;;
-      12) show_help; pause ;;
+      10) domain_cert_menu; pause ;;
+      11) docker compose --profile site up -d caddy-site; pause ;;
+      12) ./scripts/apply-presets.sh; ./scripts/subscription.sh; show_status; show_links; pause ;;
       13) autostart_menu; pause ;;
+      14) show_help; pause ;;
+      15) subscription_menu; pause ;;
       0) exit 0 ;;
       *) echo "${yellow}无效选项。${plain}"; pause ;;
     esac

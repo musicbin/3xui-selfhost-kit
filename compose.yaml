@@ -1,4 +1,26 @@
 services:
+  subconverter:
+    image: ${SUBCONVERTER_IMAGE:-tindy2013/subconverter:latest}
+    container_name: ${SUBCONVERTER_CONTAINER:-3xui_subconverter}
+    expose:
+      - "25500"
+    restart: unless-stopped
+
+  subconfig-api:
+    image: ${SUB_CONFIG_API_IMAGE:-python:3-alpine}
+    container_name: ${SUB_CONFIG_API_CONTAINER:-3xui_subconfig_api}
+    command: ["python", "/app/subconfig-api.py"]
+    environment:
+      SUB_CONFIG_PATH: /config/3.5.yaml
+      SUB_CONFIG_ADMIN_TOKEN: ${SUB_CONFIG_ADMIN_TOKEN:-}
+      SUB_CONFIG_PORT: "27880"
+    expose:
+      - "27880"
+    volumes:
+      - ./scripts/subconfig-api.py:/app/subconfig-api.py:ro
+      - ./site/sub/config:/config
+    restart: unless-stopped
+
   3xui:
     image: ${XUI_IMAGE:-ghcr.io/mhsanaei/3x-ui:latest}
     container_name: ${XUI_CONTAINER:-3xui}
@@ -28,7 +50,23 @@ services:
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./site:/usr/share/caddy:ro
+      - ./data/cert:/cert:ro
       - ./data/caddy:/data
       - ./data/caddy-config:/config
     restart: unless-stopped
 
+  caddy-https:
+    image: caddy:2-alpine
+    container_name: ${CADDY_HTTPS_CONTAINER:-3xui_https_site}
+    profiles:
+      - https-site
+    ports:
+      - "${SITE_HTTP_PORT:-80}:80"
+      - "${SITE_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./site:/usr/share/caddy:ro
+      - ./data/cert:/cert:ro
+      - ./data/caddy:/data
+      - ./data/caddy-config:/config
+    restart: unless-stopped

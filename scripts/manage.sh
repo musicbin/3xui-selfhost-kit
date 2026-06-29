@@ -40,6 +40,8 @@ Commands:
   links          Print generated client links
   token          Generate a fresh 3x-ui API token
   autostart      Open boot autostart settings
+  domain         Configure domains, HTTPS certificates, and Trojan TLS
+  subscription   Generate local subscription converter web UI
 EOF
 }
 
@@ -114,6 +116,12 @@ case "$cmd" in
     ;;
   autostart)
     ./scripts/menu.sh --autostart
+    ;;
+  domain)
+    ./scripts/domain-cert.sh
+    ;;
+  subscription)
+    ./scripts/subscription.sh
     ;;
   *)
     usage

@@ -12,6 +12,7 @@ OVERRIDE_KEYS=(
   ENABLE_HYSTERIA ENABLE_TROJAN ENABLE_SHADOWSOCKS ALLOW_SELF_SIGNED_TLS
   HYSTERIA_PORT TROJAN_PORT SHADOWSOCKS_PORT TLS_CERT_FILE TLS_KEY_FILE TLS_SERVER_NAME
   CHAIN_ENABLED CHAIN_MODE CHAIN_TYPE CHAIN_ADDRESS CHAIN_PORT CHAIN_USER CHAIN_PASS
+  CHAIN_SERVER_NAME CHAIN_ALLOW_INSECURE
 )
 
 for key in "${OVERRIDE_KEYS[@]}"; do
@@ -118,6 +119,18 @@ api_post_form() {
 inbound_exists() {
   local remark="$1"
   api_get "/panel/api/inbounds/list" | jq -e --arg remark "$remark" '.obj[]? | select(.remark == $remark)' >/dev/null
+}
+
+delete_inbound_by_remark() {
+  local remark="$1"
+  local ids id
+  ids="$(api_get "/panel/api/inbounds/list" | jq -r --arg remark "$remark" '.obj[]? | select(.remark == $remark) | .id')"
+  [ -n "$ids" ] || return 0
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    echo "Deleting managed inbound before re-create: $remark ($id)"
+    api_post_form "/panel/api/inbounds/del/${id}" | jq . || true
+  done <<< "$ids"
 }
 
 add_inbound_if_missing() {
@@ -242,6 +255,10 @@ write_vless_reality() {
       }
     }' > "$file"
 
+  delete_inbound_by_remark "$remark"
+  if [ "${REALITY_PORT:-443}" != "443" ]; then
+    delete_inbound_by_remark "auto-vless-reality-443"
+  fi
   add_inbound_if_missing "$remark" "$file"
 
   {
@@ -348,6 +365,7 @@ write_hysteria2_optional() {
       }
     }' > "$file"
 
+  delete_inbound_by_remark "$remark"
   add_inbound_if_missing "$remark" "$file"
 
   {
@@ -450,6 +468,7 @@ write_trojan_optional() {
       }
     }' > "$file"
 
+  delete_inbound_by_remark "$remark"
   add_inbound_if_missing "$remark" "$file"
 
   {
@@ -523,6 +542,7 @@ write_shadowsocks_optional() {
       }
     }' > "$file"
 
+  delete_inbound_by_remark "$remark"
   add_inbound_if_missing "$remark" "$file"
 
   {
@@ -557,8 +577,33 @@ apply_chain_optional() {
         | if $user != "" then .settings.servers[0].users=[{user:$user, pass:$pass}] else . end
       ')"
       ;;
+    trojan)
+      [ -n "${CHAIN_PASS:-}" ] || { echo "CHAIN_TYPE=trojan requires CHAIN_PASS." >&2; return; }
+      outbound="$(jq -n \
+        --arg tag "$tag" \
+        --arg addr "$CHAIN_ADDRESS" \
+        --argjson port "$CHAIN_PORT" \
+        --arg pass "$CHAIN_PASS" \
+        --arg sni "${CHAIN_SERVER_NAME:-$CHAIN_ADDRESS}" \
+        --arg allowInsecure "${CHAIN_ALLOW_INSECURE:-0}" '
+        {
+          tag:$tag,
+          protocol:"trojan",
+          settings:{servers:[{address:$addr, port:$port, password:$pass}]},
+          streamSettings:{
+            network:"tcp",
+            security:"tls",
+            tlsSettings:{
+              serverName:$sni,
+              allowInsecure:($allowInsecure == "1"),
+              fingerprint:"chrome"
+            }
+          }
+        }
+      ')"
+      ;;
     *)
-      echo "CHAIN_TYPE currently supports socks or http for fully automatic Xray-template wiring." >&2
+      echo "CHAIN_TYPE currently supports socks, http, or trojan for fully automatic Xray-template wiring." >&2
       return
       ;;
   esac

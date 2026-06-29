@@ -89,9 +89,14 @@ download_project() {
     "compose.yaml"
     "scripts/manage.sh"
     "scripts/apply-presets.sh"
+    "scripts/domain-cert.sh"
+    "scripts/subscription.sh"
+    "scripts/subconfig-api.py"
+    "scripts/start-services.sh"
     "scripts/menu.sh"
     "caddy/Caddyfile"
     "site/index.html"
+    "site/sub/config/3.5.yaml"
     "README.md"
     "SECURITY.md"
   )
@@ -106,7 +111,122 @@ download_project() {
 install_cli_shortcut() {
   mkdir -p /usr/local/bin
   ln -sf "${INSTALL_DIR}/scripts/menu.sh" /usr/local/bin/3xui-kit
+  ln -sf "${INSTALL_DIR}/scripts/menu.sh" /usr/local/bin/x-ui
   chmod +x "${INSTALL_DIR}/scripts/menu.sh"
+}
+
+configure_firewall_ports() {
+  if [ "${CONFIGURE_FIREWALL:-1}" != "1" ]; then
+    return
+  fi
+
+  local ports=(
+    "22/tcp"
+    "80/tcp"
+    "${REALITY_PORT:-443}/tcp"
+  )
+
+  if [ "${PANEL_LISTEN_IP:-127.0.0.1}" = "0.0.0.0" ]; then
+    ports+=("${PANEL_PORT:-2053}/tcp")
+  fi
+  if [ "${ENABLE_SHADOWSOCKS:-1}" = "1" ]; then
+    ports+=("${SHADOWSOCKS_PORT:-8388}/tcp" "${SHADOWSOCKS_PORT:-8388}/udp")
+  fi
+  if [ "${ENABLE_TROJAN:-0}" = "1" ]; then
+    ports+=("${TROJAN_PORT:-9443}/tcp")
+  fi
+  if [ "${ENABLE_HYSTERIA:-0}" = "1" ]; then
+    ports+=("${HYSTERIA_PORT:-8443}/udp")
+  fi
+
+  if command -v ufw >/dev/null 2>&1; then
+    local p
+    for p in "${ports[@]}"; do
+      ufw allow "$p" >/dev/null 2>&1 || true
+    done
+    log "Firewall rules ensured with ufw: ${ports[*]}"
+  elif command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active firewalld >/dev/null 2>&1; then
+    local p proto port
+    for p in "${ports[@]}"; do
+      port="${p%/*}"
+      proto="${p#*/}"
+      firewall-cmd --permanent --add-port="${port}/${proto}" >/dev/null 2>&1 || true
+    done
+    firewall-cmd --reload >/dev/null 2>&1 || true
+    log "Firewall rules ensured with firewalld: ${ports[*]}"
+  else
+    log "No ufw/firewalld detected; make sure ports are allowed by your VPS firewall: ${ports[*]}"
+  fi
+}
+
+generate_mask_site() {
+  if [ "${ENABLE_MASK_SITE:-1}" != "1" ]; then
+    return
+  fi
+
+  mkdir -p "${INSTALL_DIR}/site"
+  cat > "${INSTALL_DIR}/site/index.html" <<EOF
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Service Status</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f6f7f9; color: #1f2937; }
+    main { width: min(760px, calc(100vw - 40px)); }
+    h1 { font-size: 42px; margin: 0 0 12px; letter-spacing: 0; }
+    p { font-size: 16px; line-height: 1.7; margin: 0; color: #4b5563; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #101216; color: #f3f4f6; }
+      p { color: #cbd5e1; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Service online</h1>
+    <p>This host is serving a normal static page. Administrative access is not exposed from this page.</p>
+  </main>
+</body>
+</html>
+EOF
+}
+
+start_mask_site() {
+  if [ "${ENABLE_MASK_SITE:-1}" != "1" ]; then
+    return
+  fi
+  cd "$INSTALL_DIR"
+  if docker compose --profile site up -d caddy-site; then
+    log "Masquerade static site is running on port 80."
+  else
+    log "Masquerade site did not start. Port 80 may already be in use."
+  fi
+}
+
+configure_domains() {
+  load_env
+  if [ "${ENABLE_ACME:-0}" != "1" ] || [ -z "${DOMAIN_NAMES:-}" ]; then
+    return
+  fi
+  log "Configuring domain certificates: ${DOMAIN_NAMES}"
+  if ! (cd "$INSTALL_DIR" && AUTO_ENABLE_TROJAN="${AUTO_ENABLE_TROJAN:-1}" ./scripts/domain-cert.sh --auto); then
+    log "Domain certificate automation did not fully complete. You can retry later with: x-ui -> domain/cert menu"
+  fi
+  load_env
+}
+
+configure_subscription() {
+  load_env
+  if [ "${ENABLE_SUBCONVERTER:-1}" != "1" ]; then
+    return
+  fi
+  log "Configuring subscription converter web UI."
+  if ! (cd "$INSTALL_DIR" && ./scripts/subscription.sh); then
+    log "Subscription converter setup did not fully complete. Retry later with: x-ui -> subscription menu"
+  fi
 }
 
 install_systemd_autostart() {
@@ -134,8 +254,8 @@ Requires=docker.service
 [Service]
 Type=oneshot
 WorkingDirectory=${INSTALL_DIR}
-ExecStart=${docker_bin} compose up -d 3xui
-ExecStop=${docker_bin} compose stop 3xui
+ExecStart=/usr/bin/env bash ${INSTALL_DIR}/scripts/start-services.sh
+ExecStop=${docker_bin} compose stop 3xui subconverter subconfig-api caddy-site caddy-https
 RemainAfterExit=yes
 TimeoutStartSec=0
 
@@ -195,7 +315,7 @@ run_config_wizard() {
     return
   fi
 
-  local detected_addr bind_choice target server_names chain_addr chain_port
+  local detected_addr bind_choice target server_names chain_addr chain_port domains acme_email
   detected_addr="$(public_ip)"
 
   tty_print ""
@@ -206,6 +326,29 @@ run_config_wizard() {
   tty_print ""
 
   SERVER_ADDR="${SERVER_ADDR:-$(tty_prompt "Server public IP or domain for client links" "${detected_addr}")}"
+
+  domains="$(tty_prompt "Domains for HTTPS certificate, comma-separated, optional" "${DOMAIN_NAMES:-}")"
+  if [ -n "$domains" ]; then
+    DOMAIN_NAMES="${DOMAIN_NAMES:-$domains}"
+    TLS_SERVER_NAME="${TLS_SERVER_NAME:-${domains%%,*}}"
+    if tty_yes_no "Use the first domain for panel/client display instead of IP?" "y"; then
+      SERVER_ADDR="${domains%%,*}"
+    fi
+    ENABLE_ACME=1
+    acme_email="$(tty_prompt "ACME email for certificate renewal notices" "${ACME_EMAIL:-admin@${domains%%,*}}")"
+    ACME_EMAIL="${ACME_EMAIL:-$acme_email}"
+    if tty_yes_no "Enable Trojan TLS automatically after certificate is issued?" "y"; then
+      ENABLE_TROJAN=1
+      AUTO_ENABLE_TROJAN=1
+    fi
+    if tty_yes_no "Enable HTTPS masquerade site on 443? This moves VLESS REALITY to 8443" "y"; then
+      HTTPS_SITE_ENABLE=1
+      HTTPS_HTTP_MODE=redirect
+    else
+      HTTPS_SITE_ENABLE=0
+      HTTPS_HTTP_MODE=reject
+    fi
+  fi
 
   tty_print ""
   tty_print "Panel exposure:"
@@ -240,15 +383,17 @@ run_config_wizard() {
     TLS_KEY_FILE="${TLS_KEY_FILE:-$(tty_prompt "TLS key path inside container/host" "${TLS_KEY_FILE:-}")}"
   fi
 
-  if tty_yes_no "Enable Shadowsocks 2022 now?" "n"; then
+  if tty_yes_no "Enable Shadowsocks 2022 now?" "y"; then
     ENABLE_SHADOWSOCKS=1
     SHADOWSOCKS_PORT="${SHADOWSOCKS_PORT:-$(tty_prompt "Shadowsocks TCP/UDP port" "8388")}"
+  else
+    ENABLE_SHADOWSOCKS=0
   fi
 
   if tty_yes_no "Configure chain proxy outbound now?" "n"; then
     CHAIN_ENABLED=1
     CHAIN_MODE="${CHAIN_MODE:-$(tty_prompt "Chain mode: manual or all" "manual")}"
-    CHAIN_TYPE="${CHAIN_TYPE:-$(tty_prompt "Chain type: socks or http" "socks")}"
+    CHAIN_TYPE="${CHAIN_TYPE:-$(tty_prompt "Chain type: socks, http, or trojan" "socks")}"
     chain_addr="$(tty_prompt "Chain proxy address" "${CHAIN_ADDRESS:-}")"
     chain_port="$(tty_prompt "Chain proxy port" "${CHAIN_PORT:-}")"
     CHAIN_ADDRESS="${CHAIN_ADDRESS:-$chain_addr}"
@@ -295,7 +440,7 @@ REALITY_SPIDER_X=${REALITY_SPIDER_X:-/}
 ENABLE_PRESETS=${ENABLE_PRESETS:-1}
 ENABLE_HYSTERIA=${ENABLE_HYSTERIA:-0}
 ENABLE_TROJAN=${ENABLE_TROJAN:-0}
-ENABLE_SHADOWSOCKS=${ENABLE_SHADOWSOCKS:-0}
+ENABLE_SHADOWSOCKS=${ENABLE_SHADOWSOCKS:-1}
 ALLOW_SELF_SIGNED_TLS=${ALLOW_SELF_SIGNED_TLS:-0}
 TLS_CERT_FILE=${TLS_CERT_FILE:-}
 TLS_KEY_FILE=${TLS_KEY_FILE:-}
@@ -311,8 +456,24 @@ CHAIN_ADDRESS=${CHAIN_ADDRESS:-}
 CHAIN_PORT=${CHAIN_PORT:-}
 CHAIN_USER=${CHAIN_USER:-}
 CHAIN_PASS=${CHAIN_PASS:-}
+CHAIN_SERVER_NAME=${CHAIN_SERVER_NAME:-}
+CHAIN_ALLOW_INSECURE=${CHAIN_ALLOW_INSECURE:-0}
 
 SITE_HTTP_PORT=${SITE_HTTP_PORT:-80}
+ENABLE_MASK_SITE=${ENABLE_MASK_SITE:-1}
+DOMAIN_NAMES=${DOMAIN_NAMES:-}
+ENABLE_ACME=${ENABLE_ACME:-0}
+ACME_EMAIL=${ACME_EMAIL:-}
+AUTO_ENABLE_TROJAN=${AUTO_ENABLE_TROJAN:-1}
+HTTPS_SITE_ENABLE=${HTTPS_SITE_ENABLE:-0}
+HTTPS_HTTP_MODE=${HTTPS_HTTP_MODE:-reject}
+SITE_HTTPS_PORT=${SITE_HTTPS_PORT:-443}
+ENABLE_SUBCONVERTER=${ENABLE_SUBCONVERTER:-1}
+SUBCONVERTER_IMAGE=${SUBCONVERTER_IMAGE:-tindy2013/subconverter:latest}
+SUBSCRIPTION_TOKEN=${SUBSCRIPTION_TOKEN:-}
+ENABLE_SUB_CONFIG_EDITOR=${ENABLE_SUB_CONFIG_EDITOR:-1}
+SUB_CONFIG_API_IMAGE=${SUB_CONFIG_API_IMAGE:-python:3-alpine}
+SUB_CONFIG_ADMIN_TOKEN=${SUB_CONFIG_ADMIN_TOKEN:-}
 EOF
   chmod 600 .env
 }
@@ -439,8 +600,12 @@ write_install_summary() {
   Add a chain proxy outbound and route all traffic through it:
     CHAIN_ENABLED=1 CHAIN_MODE=all CHAIN_TYPE=socks CHAIN_ADDRESS=1.2.3.4 CHAIN_PORT=1080 ./scripts/apply-presets.sh
 
+  Add an upstream Trojan outbound:
+    CHAIN_ENABLED=1 CHAIN_MODE=all CHAIN_TYPE=trojan CHAIN_ADDRESS=upstream.example.com CHAIN_PORT=443 CHAIN_PASS=trojan-password CHAIN_SERVER_NAME=upstream.example.com ./scripts/apply-presets.sh
+
 7) Manage
   cd ${INSTALL_DIR}
+  x-ui
   3xui-kit
   ./scripts/manage.sh menu
   ./scripts/manage.sh status
@@ -456,6 +621,29 @@ write_install_summary() {
   systemd service: 3xui-kit.service
   Check status:
     systemctl status 3xui-kit.service --no-pager
+
+10) Domains and HTTPS
+  Domains: ${DOMAIN_NAMES:-not configured}
+  ACME auto renew: ${ENABLE_ACME:-0}
+  HTTPS masquerade site: ${HTTPS_SITE_ENABLE:-0}
+  HTTP mode after certificate: ${HTTPS_HTTP_MODE:-reject}
+  TLS cert in container: ${TLS_CERT_FILE:-not configured}
+
+11) Subscription converter
+  Web UI:
+    $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s/sub/' "${SERVER_ADDR:-your-server}" || printf 'http://%s:%s/sub/' "${SERVER_ADDR:-your-server}" "${SITE_HTTP_PORT:-80}")
+  Local node subscription:
+    $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s/subscriptions/%s.txt' "${SERVER_ADDR:-your-server}" "${SUBSCRIPTION_TOKEN:-token}" || printf 'http://%s:%s/subscriptions/%s.txt' "${SERVER_ADDR:-your-server}" "${SITE_HTTP_PORT:-80}" "${SUBSCRIPTION_TOKEN:-token}")
+  Default local conversion config:
+    $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s/sub/config/3.5.yaml' "${SERVER_ADDR:-your-server}" || printf 'http://%s:%s/sub/config/3.5.yaml' "${SERVER_ADDR:-your-server}" "${SITE_HTTP_PORT:-80}")
+  Rules editor:
+    $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s/sub/' "${SERVER_ADDR:-your-server}" || printf 'http://%s:%s/sub/' "${SERVER_ADDR:-your-server}" "${SITE_HTTP_PORT:-80}")
+  Rules editor token:
+    ${SUB_CONFIG_ADMIN_TOKEN:-not generated yet}
+  Backend image:
+    ${SUBCONVERTER_IMAGE:-tindy2013/subconverter:latest}
+  Note:
+    If HTTPS_SITE_ENABLE=0 and HTTPS_HTTP_MODE=reject, public /sub/ is intentionally blocked after certificate setup. Enable the HTTPS site from x-ui to use /sub/ over TLS.
 EOF
   chmod 600 "$summary"
 }
@@ -486,11 +674,15 @@ main() {
   download_project
   install_cli_shortcut
   write_env
+  load_env
+  generate_mask_site
+  configure_firewall_ports
   compose_up
   install_systemd_autostart
-  load_env
   wait_panel_db
   configure_panel
+  start_mask_site
+  configure_domains
 
   if [ "${ENABLE_PRESETS:-1}" = "1" ]; then
     log "Applying protocol presets."
@@ -499,6 +691,8 @@ main() {
       log "After the panel is reachable, run: cd ${INSTALL_DIR} && ./scripts/manage.sh apply-presets"
     fi
   fi
+
+  configure_subscription
 
   write_install_summary
   print_install_summary

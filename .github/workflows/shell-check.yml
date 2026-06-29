@@ -14,4 +14,8 @@ jobs:
           bash -n install.sh
           bash -n scripts/manage.sh
           bash -n scripts/apply-presets.sh
+          bash -n scripts/domain-cert.sh
+          bash -n scripts/subscription.sh
+          bash -n scripts/start-services.sh
           bash -n scripts/menu.sh
+          python3 -m py_compile scripts/subconfig-api.py
