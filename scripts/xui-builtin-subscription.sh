@@ -22,6 +22,8 @@ XUI_BUILTIN_SUB_LISTEN="${XUI_BUILTIN_SUB_LISTEN:-127.0.0.1}"
 XUI_BUILTIN_SUB_PORT="${XUI_BUILTIN_SUB_PORT:-2096}"
 XUI_BUILTIN_JSON_ENABLE="${XUI_BUILTIN_JSON_ENABLE:-0}"
 XUI_BUILTIN_CLASH_ENABLE="${XUI_BUILTIN_CLASH_ENABLE:-0}"
+XUI_BUILTIN_RESTART="${XUI_BUILTIN_RESTART:-1}"
+XUI_BUILTIN_RESTART_DELAY="${XUI_BUILTIN_RESTART_DELAY:-15}"
 
 log() { printf '[xui-sub] %s\n' "$*"; }
 
@@ -184,8 +186,6 @@ configure_panel_subscription() {
     "${base%/}/panel/api/setting/update" > runtime/xui-setting-update-response.json
 
   jq -e '.success == true' runtime/xui-setting-update-response.json >/dev/null
-  docker restart "$XUI_CONTAINER" >/dev/null
-  sleep 5
   log "3x-ui built-in subscription base: ${sub_uri:-local-only at ${XUI_BUILTIN_SUB_LISTEN}:${XUI_BUILTIN_SUB_PORT}${sub_path}}"
 }
 
@@ -252,6 +252,14 @@ secure_firewall() {
   fi
 }
 
+restart_xui_later() {
+  [ "$XUI_BUILTIN_RESTART" = "1" ] || return 0
+  mkdir -p runtime
+  chmod 700 runtime
+  log "Scheduling 3x-ui restart in ${XUI_BUILTIN_RESTART_DELAY}s so new subscription settings take effect."
+  nohup sh -c "sleep '${XUI_BUILTIN_RESTART_DELAY}'; docker restart '${XUI_CONTAINER}' >>'${ROOT_DIR}/runtime/xui-builtin-subscription-restart.log' 2>&1 || true" >/dev/null 2>&1 &
+}
+
 main() {
   [ "$XUI_BUILTIN_SUB_ENABLE" = "1" ] || exit 0
   configure_panel_subscription
@@ -263,6 +271,7 @@ main() {
   XUI_BUILTIN_SUB_PORT="${XUI_BUILTIN_SUB_PORT:-2096}"
   upsert_caddy_proxy
   secure_firewall
+  restart_xui_later
 }
 
 main "$@"
