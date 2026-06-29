@@ -15,6 +15,7 @@ OVERRIDE_KEYS=(
   DOKODEMO_NETWORK DOKODEMO_FOLLOW_REDIRECT DOKODEMO_TPROXY
   CHAIN_ENABLED CHAIN_MODE CHAIN_TYPE CHAIN_ADDRESS CHAIN_PORT CHAIN_USER CHAIN_PASS
   CHAIN_SERVER_NAME CHAIN_ALLOW_INSECURE
+  PRESET_CLIENT_SUFFIX RECREATE_MANAGED_INBOUNDS
 )
 
 for key in "${OVERRIDE_KEYS[@]}"; do
@@ -56,6 +57,31 @@ need openssl
 rand_hex() { openssl rand -hex "${1:-8}"; }
 rand_b64() { openssl rand -base64 "${1:-24}" | tr -d '\n' | tr '/+' 'Aa'; }
 b64_url_no_pad() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+
+set_env_var() {
+  local key="$1"
+  local value="$2"
+  local tmp
+  tmp="$(mktemp)"
+  awk -v k="$key" -v v="$value" '
+    BEGIN { done = 0 }
+    $0 ~ "^" k "=" { print k "=" v; done = 1; next }
+    { print }
+    END { if (!done) print k "=" v }
+  ' .env > "$tmp"
+  mv "$tmp" .env
+  chmod 600 .env
+}
+
+ensure_preset_client_suffix() {
+  if [ -z "${PRESET_CLIENT_SUFFIX:-}" ]; then
+    PRESET_CLIENT_SUFFIX="$(rand_hex 4)"
+    set_env_var PRESET_CLIENT_SUFFIX "$PRESET_CLIENT_SUFFIX"
+  fi
+}
+
+ensure_preset_client_suffix
+
 new_uuid() {
   if [ -r /proc/sys/kernel/random/uuid ]; then
     cat /proc/sys/kernel/random/uuid
@@ -135,15 +161,24 @@ delete_inbound_by_remark() {
   done <<< "$ids"
 }
 
+recreate_inbound_if_requested() {
+  local remark="$1"
+  [ "${RECREATE_MANAGED_INBOUNDS:-0}" = "1" ] || return 0
+  delete_inbound_by_remark "$remark"
+}
+
 add_inbound_if_missing() {
   local remark="$1"
   local file="$2"
+  local resp
   if inbound_exists "$remark"; then
     echo "Inbound exists: $remark"
-    return
+    return 2
   fi
   echo "Adding inbound: $remark"
-  api_post_json "/panel/api/inbounds/add" "$file" | jq .
+  resp="$(api_post_json "/panel/api/inbounds/add" "$file")"
+  printf '%s\n' "$resp" | jq .
+  printf '%s\n' "$resp" | jq -e '.success == true' >/dev/null
 }
 
 first_csv() {
@@ -187,6 +222,7 @@ write_vless_reality() {
     --argjson port "${REALITY_PORT:-443}" \
     --arg shareAddr "${SERVER_ADDR:-}" \
     --arg uuid "$uuid" \
+    --arg email "me-vless-reality-${PRESET_CLIENT_SUFFIX}" \
     --arg subId "$sub_id" \
     --arg target "${REALITY_TARGET:-www.cloudflare.com:443}" \
     --argjson serverNames "$server_names_json" \
@@ -208,7 +244,7 @@ write_vless_reality() {
       settings: {
         clients: [{
           id: $uuid,
-          email: "me-vless-reality",
+          email: $email,
           flow: "xtls-rprx-vision",
           limitIp: 0,
           totalGB: 0,
@@ -257,17 +293,17 @@ write_vless_reality() {
       }
     }' > "$file"
 
-  delete_inbound_by_remark "$remark"
-  if [ "${REALITY_PORT:-443}" != "443" ]; then
+  recreate_inbound_if_requested "$remark"
+  if [ "${RECREATE_MANAGED_INBOUNDS:-0}" = "1" ] && [ "${REALITY_PORT:-443}" != "443" ]; then
     delete_inbound_by_remark "auto-vless-reality-443"
   fi
-  add_inbound_if_missing "$remark" "$file"
-
-  {
-    echo "VLESS REALITY"
-    echo "vless://${uuid}@${SERVER_ADDR:-YOUR_SERVER_IP}:${REALITY_PORT:-443}?type=tcp&security=reality&pbk=${public_key}&fp=chrome&sni=${sni}&sid=${short_id}&spx=%2F&flow=xtls-rprx-vision#${remark}"
-    echo
-  } >> runtime/client-links.txt
+  if add_inbound_if_missing "$remark" "$file"; then
+    {
+      echo "VLESS REALITY"
+      echo "vless://${uuid}@${SERVER_ADDR:-YOUR_SERVER_IP}:${REALITY_PORT:-443}?type=tcp&security=reality&pbk=${public_key}&fp=chrome&sni=${sni}&sid=${short_id}&spx=%2F&flow=xtls-rprx-vision#${remark}"
+      echo
+    } >> runtime/client-links.txt
+  fi
 }
 
 write_hysteria2_optional() {
@@ -299,6 +335,7 @@ write_hysteria2_optional() {
     --argjson port "${HYSTERIA_PORT:-8443}" \
     --arg shareAddr "${SERVER_ADDR:-}" \
     --arg auth "$auth" \
+    --arg email "me-hysteria2-${PRESET_CLIENT_SUFFIX}" \
     --arg subId "$sub_id" \
     --arg certFile "$cert_file" \
     --arg keyFile "$key_file" \
@@ -318,7 +355,7 @@ write_hysteria2_optional() {
         version: 2,
         clients: [{
           auth: $auth,
-          email: "me-hysteria2",
+          email: $email,
           limitIp: 0,
           totalGB: 0,
           expiryTime: 0,
@@ -367,14 +404,14 @@ write_hysteria2_optional() {
       }
     }' > "$file"
 
-  delete_inbound_by_remark "$remark"
-  add_inbound_if_missing "$remark" "$file"
-
-  {
-    echo "Hysteria2"
-    echo "hysteria2://${auth}@${SERVER_ADDR:-YOUR_SERVER_IP}:${HYSTERIA_PORT:-8443}?security=tls&sni=${TLS_SERVER_NAME:-${SERVER_ADDR:-localhost}}&alpn=h3#${remark}"
-    echo
-  } >> runtime/client-links.txt
+  recreate_inbound_if_requested "$remark"
+  if add_inbound_if_missing "$remark" "$file"; then
+    {
+      echo "Hysteria2"
+      echo "hysteria2://${auth}@${SERVER_ADDR:-YOUR_SERVER_IP}:${HYSTERIA_PORT:-8443}?security=tls&sni=${TLS_SERVER_NAME:-${SERVER_ADDR:-localhost}}&alpn=h3#${remark}"
+      echo
+    } >> runtime/client-links.txt
+  fi
 }
 
 write_trojan_optional() {
@@ -406,6 +443,7 @@ write_trojan_optional() {
     --argjson port "${TROJAN_PORT:-9443}" \
     --arg shareAddr "${SERVER_ADDR:-}" \
     --arg password "$password" \
+    --arg email "me-trojan-${PRESET_CLIENT_SUFFIX}" \
     --arg subId "$sub_id" \
     --arg certFile "$cert_file" \
     --arg keyFile "$key_file" \
@@ -424,7 +462,7 @@ write_trojan_optional() {
       settings: {
         clients: [{
           password: $password,
-          email: "me-trojan",
+          email: $email,
           limitIp: 0,
           totalGB: 0,
           expiryTime: 0,
@@ -470,14 +508,14 @@ write_trojan_optional() {
       }
     }' > "$file"
 
-  delete_inbound_by_remark "$remark"
-  add_inbound_if_missing "$remark" "$file"
-
-  {
-    echo "Trojan WS TLS"
-    echo "trojan://${password}@${SERVER_ADDR:-YOUR_SERVER_IP}:${TROJAN_PORT:-9443}?type=ws&security=tls&sni=${TLS_SERVER_NAME:-${SERVER_ADDR:-localhost}}&path=%2Ftrojan#${remark}"
-    echo
-  } >> runtime/client-links.txt
+  recreate_inbound_if_requested "$remark"
+  if add_inbound_if_missing "$remark" "$file"; then
+    {
+      echo "Trojan WS TLS"
+      echo "trojan://${password}@${SERVER_ADDR:-YOUR_SERVER_IP}:${TROJAN_PORT:-9443}?type=ws&security=tls&sni=${TLS_SERVER_NAME:-${SERVER_ADDR:-localhost}}&path=%2Ftrojan#${remark}"
+      echo
+    } >> runtime/client-links.txt
+  fi
 }
 
 write_shadowsocks_optional() {
@@ -498,6 +536,7 @@ write_shadowsocks_optional() {
     --arg shareAddr "${SERVER_ADDR:-}" \
     --arg serverPassword "$server_password" \
     --arg clientPassword "$client_password" \
+    --arg email "me-shadowsocks-${PRESET_CLIENT_SUFFIX}" \
     --arg subId "$sub_id" \
     '{
       enable: true,
@@ -517,7 +556,7 @@ write_shadowsocks_optional() {
         clients: [{
           method: "",
           password: $clientPassword,
-          email: "me-shadowsocks",
+          email: $email,
           limitIp: 0,
           totalGB: 0,
           expiryTime: 0,
@@ -544,14 +583,14 @@ write_shadowsocks_optional() {
       }
     }' > "$file"
 
-  delete_inbound_by_remark "$remark"
-  add_inbound_if_missing "$remark" "$file"
-
-  {
-    echo "Shadowsocks 2022"
-    echo "ss://${ss_userinfo}@${SERVER_ADDR:-YOUR_SERVER_IP}:${SHADOWSOCKS_PORT:-8388}#${remark}"
-    echo
-  } >> runtime/client-links.txt
+  recreate_inbound_if_requested "$remark"
+  if add_inbound_if_missing "$remark" "$file"; then
+    {
+      echo "Shadowsocks 2022"
+      echo "ss://${ss_userinfo}@${SERVER_ADDR:-YOUR_SERVER_IP}:${SHADOWSOCKS_PORT:-8388}#${remark}"
+      echo
+    } >> runtime/client-links.txt
+  fi
 }
 
 write_dokodemo_optional() {
@@ -609,14 +648,14 @@ write_dokodemo_optional() {
       sniffing: {enabled: false}
     }' > "$file"
 
-  delete_inbound_by_remark "$remark"
-  add_inbound_if_missing "$remark" "$file"
-
-  {
-    echo "dokodemo-door forwarder (3X-UI protocol: tunnel)"
-    echo "${listen}:${DOKODEMO_PORT} -> ${DOKODEMO_TARGET_ADDRESS}:${DOKODEMO_TARGET_PORT} (${network})"
-    echo
-  } >> runtime/client-links.txt
+  recreate_inbound_if_requested "$remark"
+  if add_inbound_if_missing "$remark" "$file"; then
+    {
+      echo "dokodemo-door forwarder (3X-UI protocol: tunnel)"
+      echo "${listen}:${DOKODEMO_PORT} -> ${DOKODEMO_TARGET_ADDRESS}:${DOKODEMO_TARGET_PORT} (${network})"
+      echo
+    } >> runtime/client-links.txt
+  fi
 }
 
 apply_chain_optional() {
