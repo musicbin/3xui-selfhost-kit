@@ -251,7 +251,9 @@ write_vless_reality() {
 }
 
 write_hysteria2_optional() {
-  [ "${ENABLE_HYSTERIA:-0}" = "1" ] || return
+  if [ "${ENABLE_HYSTERIA:-0}" != "1" ]; then
+    return 0
+  fi
   if [ "${ALLOW_SELF_SIGNED_TLS:-0}" != "1" ] && { [ -z "${TLS_CERT_FILE:-}" ] || [ -z "${TLS_KEY_FILE:-}" ]; }; then
     echo "Skipping Hysteria2: set TLS_CERT_FILE/TLS_KEY_FILE or ALLOW_SELF_SIGNED_TLS=1."
     return
@@ -355,7 +357,9 @@ write_hysteria2_optional() {
 }
 
 write_trojan_optional() {
-  [ "${ENABLE_TROJAN:-0}" = "1" ] || return
+  if [ "${ENABLE_TROJAN:-0}" != "1" ]; then
+    return 0
+  fi
   if [ "${ALLOW_SELF_SIGNED_TLS:-0}" != "1" ] && { [ -z "${TLS_CERT_FILE:-}" ] || [ -z "${TLS_KEY_FILE:-}" ]; }; then
     echo "Skipping Trojan: set TLS_CERT_FILE/TLS_KEY_FILE or ALLOW_SELF_SIGNED_TLS=1."
     return
@@ -455,7 +459,9 @@ write_trojan_optional() {
 }
 
 write_shadowsocks_optional() {
-  [ "${ENABLE_SHADOWSOCKS:-0}" = "1" ] || return
+  if [ "${ENABLE_SHADOWSOCKS:-0}" != "1" ]; then
+    return 0
+  fi
   local remark server_password client_password sub_id file
   remark="auto-shadowsocks-2022-${SHADOWSOCKS_PORT:-8388}"
   server_password="$(rand_b64 24)"
@@ -525,7 +531,9 @@ write_shadowsocks_optional() {
 }
 
 apply_chain_optional() {
-  [ "${CHAIN_ENABLED:-0}" = "1" ] || return
+  if [ "${CHAIN_ENABLED:-0}" != "1" ]; then
+    return 0
+  fi
   [ -n "${CHAIN_ADDRESS:-}" ] || { echo "CHAIN_ENABLED=1 but CHAIN_ADDRESS is empty." >&2; return; }
   [ -n "${CHAIN_PORT:-}" ] || { echo "CHAIN_ENABLED=1 but CHAIN_PORT is empty." >&2; return; }
 
