@@ -266,9 +266,7 @@ upsert_caddy_proxy() {
   cat > "$block" <<EOF
 	# 3xui builtin subscription start
 	@xuiBuiltinSubBase path ${base_paths}
-	handle @xuiBuiltinSubBase {
-		redir /sub/ 308
-	}
+	redir @xuiBuiltinSubBase /sub/ 308
 	@xuiBuiltinSub path ${subid_paths}
 	handle @xuiBuiltinSub {
 		reverse_proxy 127.0.0.1:${XUI_BUILTIN_SUB_PORT}

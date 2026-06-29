@@ -121,9 +121,7 @@ xui_builtin_sub_caddy_block() {
   cat <<EOF
 	# 3xui builtin subscription start
 	@xuiBuiltinSubBase path ${sub_path%/} ${sub_path} ${json_path%/} ${json_path} ${clash_path%/} ${clash_path}
-	handle @xuiBuiltinSubBase {
-		redir /sub/ 308
-	}
+	redir @xuiBuiltinSubBase /sub/ 308
 	@xuiBuiltinSub path ${sub_path%/}/* ${json_path%/}/* ${clash_path%/}/*
 	handle @xuiBuiltinSub {
 		reverse_proxy 127.0.0.1:${port}
