@@ -52,6 +52,7 @@ need openssl
 
 rand_hex() { openssl rand -hex "${1:-8}"; }
 rand_b64() { openssl rand -base64 "${1:-24}" | tr -d '\n' | tr '/+' 'Aa'; }
+b64_url_no_pad() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 new_uuid() {
   if [ -r /proc/sys/kernel/random/uuid ]; then
     cat /proc/sys/kernel/random/uuid
@@ -462,10 +463,11 @@ write_shadowsocks_optional() {
   if [ "${ENABLE_SHADOWSOCKS:-0}" != "1" ]; then
     return 0
   fi
-  local remark server_password client_password sub_id file
+  local remark server_password client_password sub_id file ss_userinfo
   remark="auto-shadowsocks-2022-${SHADOWSOCKS_PORT:-8388}"
   server_password="$(rand_b64 32)"
   client_password="$(rand_b64 32)"
+  ss_userinfo="$(printf '%s' "2022-blake3-aes-256-gcm:${server_password}:${client_password}" | b64_url_no_pad)"
   sub_id="$(rand_hex 8)"
   file="runtime/shadowsocks-2022.json"
 
@@ -525,7 +527,7 @@ write_shadowsocks_optional() {
 
   {
     echo "Shadowsocks 2022"
-    echo "ss://2022-blake3-aes-256-gcm:${server_password}:${client_password}@${SERVER_ADDR:-YOUR_SERVER_IP}:${SHADOWSOCKS_PORT:-8388}#${remark}"
+    echo "ss://${ss_userinfo}@${SERVER_ADDR:-YOUR_SERVER_IP}:${SHADOWSOCKS_PORT:-8388}#${remark}"
     echo
   } >> runtime/client-links.txt
 }
@@ -585,7 +587,7 @@ write_trojan_optional
 write_shadowsocks_optional
 apply_chain_optional
 
-api_get "/panel/api/inbounds/allLinks" | jq -r '.obj[]?' > runtime/panel-all-links.txt || true
+api_get "/panel/api/inbounds/allLinks" 2>/dev/null | jq -r '.obj[]?' > runtime/panel-all-links.txt || true
 chmod 600 runtime/panel-all-links.txt 2>/dev/null || true
 
 api_post_form "/panel/api/server/restartXrayService" | jq . || true
