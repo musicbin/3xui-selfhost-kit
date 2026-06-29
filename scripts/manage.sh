@@ -42,6 +42,8 @@ Commands:
   autostart      Open boot autostart settings
   domain         Configure domains, HTTPS certificates, and Trojan TLS
   subscription   Generate local subscription converter web UI
+  xui-subscription Configure 3x-ui built-in subscription behind HTTPS
+  mask-site      Regenerate the static masquerade site
 EOF
 }
 
@@ -77,6 +79,9 @@ case "$cmd" in
     docker compose pull 3xui
     docker compose up -d 3xui
     docker exec "$XUI_CONTAINER" /app/x-ui setting -show true >/dev/null
+    if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && [ -x ./scripts/xui-builtin-subscription.sh ]; then
+      ./scripts/xui-builtin-subscription.sh || true
+    fi
     echo "Updated official 3x-ui image and restarted."
     ;;
   backup)
@@ -122,6 +127,17 @@ case "$cmd" in
     ;;
   subscription)
     ./scripts/subscription.sh
+    ;;
+  xui-subscription)
+    ./scripts/xui-builtin-subscription.sh
+    ;;
+  mask-site)
+    ./scripts/mask-site.sh
+    if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
+      docker compose --profile https-site up -d caddy-https
+    else
+      docker compose --profile site up -d caddy-site
+    fi
     ;;
   *)
     usage

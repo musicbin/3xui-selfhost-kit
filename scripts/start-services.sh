@@ -22,6 +22,12 @@ if [ "${ENABLE_SUB_CONFIG_EDITOR:-1}" = "1" ]; then
 fi
 
 if [ "${ENABLE_MASK_SITE:-1}" = "1" ]; then
+  if [ -x ./scripts/mask-site.sh ]; then
+    ./scripts/mask-site.sh
+  fi
+  if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && [ -x ./scripts/xui-builtin-subscription.sh ]; then
+    ./scripts/xui-builtin-subscription.sh || true
+  fi
   if [ -n "${TLS_CERT_FILE:-}" ] && [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
     docker compose --profile site stop caddy-site >/dev/null 2>&1 || true
     docker compose --profile https-site up -d caddy-https

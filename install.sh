@@ -15,6 +15,12 @@ random_password() {
   openssl rand -base64 36 | tr -d '\n' | tr '/+' 'Aa' | cut -c1-32
 }
 
+random_port() {
+  local hex
+  hex="$(openssl rand -hex 2)"
+  printf '%d' $((20000 + 0x${hex} % 30000))
+}
+
 need_root() {
   if [ "${EUID:-$(id -u)}" -ne 0 ]; then
     die "Please run as root, for example: curl -fsSL ${REPO_RAW_BASE}/install.sh | sudo bash"
@@ -91,6 +97,8 @@ download_project() {
     "scripts/apply-presets.sh"
     "scripts/domain-cert.sh"
     "scripts/subscription.sh"
+    "scripts/xui-builtin-subscription.sh"
+    "scripts/mask-site.sh"
     "scripts/subconfig-api.py"
     "scripts/start-services.sh"
     "scripts/menu.sh"
@@ -164,34 +172,7 @@ generate_mask_site() {
     return
   fi
 
-  mkdir -p "${INSTALL_DIR}/site"
-  cat > "${INSTALL_DIR}/site/index.html" <<EOF
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Service Status</title>
-  <style>
-    :root { color-scheme: light dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f6f7f9; color: #1f2937; }
-    main { width: min(760px, calc(100vw - 40px)); }
-    h1 { font-size: 42px; margin: 0 0 12px; letter-spacing: 0; }
-    p { font-size: 16px; line-height: 1.7; margin: 0; color: #4b5563; }
-    @media (prefers-color-scheme: dark) {
-      body { background: #101216; color: #f3f4f6; }
-      p { color: #cbd5e1; }
-    }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>Service online</h1>
-    <p>This host is serving a normal static page. Administrative access is not exposed from this page.</p>
-  </main>
-</body>
-</html>
-EOF
+  (cd "$INSTALL_DIR" && ./scripts/mask-site.sh)
 }
 
 start_mask_site() {
@@ -227,6 +208,22 @@ configure_subscription() {
   if ! (cd "$INSTALL_DIR" && ./scripts/subscription.sh); then
     log "Subscription converter setup did not fully complete. Retry later with: x-ui -> subscription menu"
   fi
+}
+
+configure_xui_builtin_subscription() {
+  load_env
+  if [ "${XUI_BUILTIN_SUB_ENABLE:-1}" != "1" ]; then
+    return
+  fi
+  if [ "${HTTPS_SITE_ENABLE:-0}" != "1" ]; then
+    log "Skipping 3x-ui built-in public subscription URI until HTTPS site is enabled."
+    return
+  fi
+  log "Configuring 3x-ui built-in subscription behind HTTPS reverse proxy."
+  if ! (cd "$INSTALL_DIR" && ./scripts/xui-builtin-subscription.sh); then
+    log "3x-ui built-in subscription setup did not fully complete. Retry later with: cd ${INSTALL_DIR} && ./scripts/manage.sh xui-subscription"
+  fi
+  load_env
 }
 
 install_systemd_autostart() {
@@ -315,8 +312,9 @@ run_config_wizard() {
     return
   fi
 
-  local detected_addr bind_choice target server_names chain_addr chain_port domains acme_email
+  local detected_addr bind_choice target server_names chain_addr chain_port domains acme_email default_panel_port
   detected_addr="$(public_ip)"
+  default_panel_port="${PANEL_PORT:-$(random_port)}"
 
   tty_print ""
   tty_print "============================================================"
@@ -361,7 +359,7 @@ run_config_wizard() {
     PANEL_LISTEN_IP="${PANEL_LISTEN_IP:-127.0.0.1}"
   fi
 
-  PANEL_PORT="${PANEL_PORT:-$(tty_prompt "Panel port" "2053")}"
+  PANEL_PORT="${PANEL_PORT:-$(tty_prompt "Panel port" "$default_panel_port")}"
   WEB_BASE_PATH="${WEB_BASE_PATH:-$(tty_prompt "Panel random path, without leading slash" "p$(random_hex 9)")}"
   REALITY_PORT="${REALITY_PORT:-$(tty_prompt "VLESS REALITY public port" "443")}"
   target="$(tty_prompt "REALITY target" "${REALITY_TARGET:-www.cloudflare.com:443}")"
@@ -415,23 +413,40 @@ write_env() {
     return
   fi
 
-  local base_path default_addr
+  local base_path default_addr first_configured_domain server_addr_default enable_acme_default https_site_default https_http_default
   base_path="${WEB_BASE_PATH:-p$(random_hex 9)}"
   base_path="${base_path#/}"
   default_addr="$(public_ip)"
+  first_configured_domain="$(printf '%s' "${DOMAIN_NAMES:-}" | awk -F'[,，;； ]+' '{print $1}')"
+  server_addr_default="$default_addr"
+  enable_acme_default="${ENABLE_ACME:-0}"
+  https_site_default="${HTTPS_SITE_ENABLE:-0}"
+  https_http_default="${HTTPS_HTTP_MODE:-reject}"
+  if [ -n "$first_configured_domain" ]; then
+    server_addr_default="$first_configured_domain"
+    if [ "${ENABLE_ACME+x}" != "x" ]; then
+      enable_acme_default=1
+    fi
+    if [ "${HTTPS_SITE_ENABLE+x}" != "x" ]; then
+      https_site_default=1
+    fi
+    if [ "${HTTPS_HTTP_MODE+x}" != "x" ]; then
+      https_http_default=redirect
+    fi
+  fi
 
   cat > .env <<EOF
 COMPOSE_PROJECT_NAME=3xui_selfhost
 XUI_IMAGE=${XUI_IMAGE:-ghcr.io/mhsanaei/3x-ui:latest}
 XUI_CONTAINER=${XUI_CONTAINER:-3xui}
 
-PANEL_PORT=${PANEL_PORT:-2053}
+PANEL_PORT=${PANEL_PORT:-$(random_port)}
 PANEL_LISTEN_IP=${PANEL_LISTEN_IP:-127.0.0.1}
 PANEL_USERNAME=${PANEL_USERNAME:-admin_$(random_hex 4)}
 PANEL_PASSWORD=${PANEL_PASSWORD:-$(random_password)}
 WEB_BASE_PATH=${base_path}
 
-SERVER_ADDR=${SERVER_ADDR:-${default_addr}}
+SERVER_ADDR=${SERVER_ADDR:-${server_addr_default}}
 REALITY_PORT=${REALITY_PORT:-443}
 REALITY_TARGET=${REALITY_TARGET:-www.cloudflare.com:443}
 REALITY_SERVER_NAMES=${REALITY_SERVER_NAMES:-www.cloudflare.com,cloudflare.com}
@@ -462,11 +477,11 @@ CHAIN_ALLOW_INSECURE=${CHAIN_ALLOW_INSECURE:-0}
 SITE_HTTP_PORT=${SITE_HTTP_PORT:-80}
 ENABLE_MASK_SITE=${ENABLE_MASK_SITE:-1}
 DOMAIN_NAMES=${DOMAIN_NAMES:-}
-ENABLE_ACME=${ENABLE_ACME:-0}
+ENABLE_ACME=${enable_acme_default}
 ACME_EMAIL=${ACME_EMAIL:-}
 AUTO_ENABLE_TROJAN=${AUTO_ENABLE_TROJAN:-1}
-HTTPS_SITE_ENABLE=${HTTPS_SITE_ENABLE:-0}
-HTTPS_HTTP_MODE=${HTTPS_HTTP_MODE:-reject}
+HTTPS_SITE_ENABLE=${https_site_default}
+HTTPS_HTTP_MODE=${https_http_default}
 SITE_HTTPS_PORT=${SITE_HTTPS_PORT:-443}
 ENABLE_SUBCONVERTER=${ENABLE_SUBCONVERTER:-1}
 SUBCONVERTER_IMAGE=${SUBCONVERTER_IMAGE:-tindy2013/subconverter:latest}
@@ -476,6 +491,14 @@ ENABLE_SUB_CONFIG_EDITOR=${ENABLE_SUB_CONFIG_EDITOR:-1}
 SUB_CONFIG_API_IMAGE=${SUB_CONFIG_API_IMAGE:-python:3-alpine}
 SUB_CONFIG_PORT=${SUB_CONFIG_PORT:-27880}
 SUB_CONFIG_ADMIN_TOKEN=${SUB_CONFIG_ADMIN_TOKEN:-}
+XUI_BUILTIN_SUB_ENABLE=${XUI_BUILTIN_SUB_ENABLE:-1}
+XUI_BUILTIN_SUB_LISTEN=${XUI_BUILTIN_SUB_LISTEN:-127.0.0.1}
+XUI_BUILTIN_SUB_PORT=${XUI_BUILTIN_SUB_PORT:-2096}
+XUI_BUILTIN_SUB_PATH=${XUI_BUILTIN_SUB_PATH:-/xui-sub-$(random_hex 6)/}
+XUI_BUILTIN_JSON_ENABLE=${XUI_BUILTIN_JSON_ENABLE:-0}
+XUI_BUILTIN_JSON_PATH=${XUI_BUILTIN_JSON_PATH:-/xui-json-$(random_hex 6)/}
+XUI_BUILTIN_CLASH_ENABLE=${XUI_BUILTIN_CLASH_ENABLE:-0}
+XUI_BUILTIN_CLASH_PATH=${XUI_BUILTIN_CLASH_PATH:-/xui-clash-$(random_hex 6)/}
 EOF
   chmod 600 .env
 }
@@ -653,6 +676,16 @@ write_install_summary() {
     ${SUBCONVERTER_IMAGE:-tindy2013/subconverter:latest}
   Note:
     If HTTPS_SITE_ENABLE=0 and HTTPS_HTTP_MODE=reject, public /sub/ is intentionally blocked after certificate setup. Enable the HTTPS site from x-ui to use /sub/ over TLS.
+
+12) 3X-UI built-in subscription
+  Listen:
+    ${XUI_BUILTIN_SUB_LISTEN:-127.0.0.1}:${XUI_BUILTIN_SUB_PORT:-2096}
+  Reverse proxy URI:
+    $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s%s' "${SERVER_ADDR:-your-server}" "${XUI_BUILTIN_SUB_PATH:-/xui-sub/}" || printf 'local-only until HTTPS is enabled')
+  JSON URI:
+    $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s%s' "${SERVER_ADDR:-your-server}" "${XUI_BUILTIN_JSON_PATH:-/xui-json/}" || printf 'local-only until HTTPS is enabled')
+  Clash URI:
+    $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s%s' "${SERVER_ADDR:-your-server}" "${XUI_BUILTIN_CLASH_PATH:-/xui-clash/}" || printf 'local-only until HTTPS is enabled')
 EOF
   chmod 600 "$summary"
 }
@@ -702,6 +735,7 @@ main() {
   fi
 
   configure_subscription
+  configure_xui_builtin_subscription
 
   write_install_summary
   print_install_summary

@@ -1,10 +1,21 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+brand="${MASK_SITE_BRAND:-Hearthline Goods}"
+title="${brand} | Home goods and studio essentials"
+
+mkdir -p site
+cat > site/index.html <<EOF
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Home goods, tableware, textiles, and studio essentials for calm everyday spaces.">
-  <title>Hearthline Goods | Home goods and studio essentials</title>
+  <title>${title}</title>
   <style>
     :root {
       color-scheme: light;
@@ -130,10 +141,10 @@
   </style>
 </head>
 <body>
-  <div class="topbar">Complimentary shipping on orders over $75 in the continental U.S.</div>
+  <div class="topbar">Complimentary shipping on orders over \$75 in the continental U.S.</div>
   <header>
     <div class="nav">
-      <a class="brand" href="/">Hearthline Goods</a>
+      <a class="brand" href="/">${brand}</a>
       <nav aria-label="Primary navigation">
         <a href="#new">New arrivals</a>
         <a href="#studio">Studio</a>
@@ -192,28 +203,28 @@
         <article class="product">
           <div class="product-art ceramic"></div>
           <div class="product-body">
-            <div class="product-title"><span>Stoneware Stem Vase</span><span>$68</span></div>
+            <div class="product-title"><span>Stoneware Stem Vase</span><span>\$68</span></div>
             <p>Hand-finished ceramic with a warm off-white glaze.</p>
           </div>
         </article>
         <article class="product">
           <div class="product-art textile"></div>
           <div class="product-body">
-            <div class="product-title"><span>Linen Grid Throw</span><span>$124</span></div>
+            <div class="product-title"><span>Linen Grid Throw</span><span>\$124</span></div>
             <p>Washed linen blend for sofas, reading chairs, and guest rooms.</p>
           </div>
         </article>
         <article class="product">
           <div class="product-art lamp-art"></div>
           <div class="product-body">
-            <div class="product-title"><span>Ochre Table Lamp</span><span>$210</span></div>
+            <div class="product-title"><span>Ochre Table Lamp</span><span>\$210</span></div>
             <p>Compact task light with a powder-coated steel shade.</p>
           </div>
         </article>
         <article class="product">
           <div class="product-art tray"></div>
           <div class="product-body">
-            <div class="product-title"><span>Forest Catchall Tray</span><span>$42</span></div>
+            <div class="product-title"><span>Forest Catchall Tray</span><span>\$42</span></div>
             <p>Glazed valet tray for entry tables and office shelves.</p>
           </div>
         </article>
@@ -274,9 +285,10 @@
 
   <footer>
     <div class="footer-inner">
-      <div>© 2026 Hearthline Goods. All rights reserved.</div>
+      <div>© 2026 ${brand}. All rights reserved.</div>
       <div>Trade inquiries · Shipping · Returns · Privacy</div>
     </div>
   </footer>
 </body>
 </html>
+EOF

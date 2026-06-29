@@ -12,10 +12,27 @@
 
 ## 一键安装
 
+默认交互式安装：
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh \
   | sudo env CONFIG_WIZARD=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
 ```
+
+如果 DNS 已经解析好，可以一条命令直接切到域名 + HTTPS 状态：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh \
+  | sudo env CONFIG_WIZARD=0 DOMAIN_NAMES=heubhkldhuu.shop,www.heubhkldhuu.shop MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
+```
+
+只要提供了 `DOMAIN_NAMES`，安装脚本会自动：
+
+- 用第一个域名作为面板、节点和订阅显示地址
+- 申请 Let's Encrypt 证书并启用自动续期
+- 启用 443 HTTPS 伪装站点
+- 将 HTTP 80 自动 308 跳转到 HTTPS
+- 将面板和 3X-UI 内置订阅服务改为本机监听，再由 Caddy 通过 HTTPS 随机路径反代
 
 安装时会进入交互向导。直接回车即可使用安全默认值；也可以输入一个或多个域名，例如：
 
@@ -58,6 +75,7 @@ sudo ./scripts/manage.sh links
 - `Shadowsocks 2022`
 - 80 端口普通伪装页面
 - 订阅转换 Web UI：`/sub/`
+- 3X-UI 内置订阅服务的 HTTPS 反代 URI，避免面板导出 `http://:2096` 链接
 - `3.5.yaml` 规则配置 Web 编辑器，使用安装时生成的编辑 token
 - Docker `restart: unless-stopped`
 - systemd 自启动服务：`3xui-kit.service`
@@ -73,22 +91,22 @@ sudo ./scripts/manage.sh links
 
 ## 面板访问
 
-默认更安全：面板绑定 `127.0.0.1:2053`，公网扫不到。安装摘要会显示公网 IP/域名和路径，但实际打开建议先建 SSH 隧道：
+默认更安全：面板绑定 `127.0.0.1:随机端口`，公网扫不到。安装摘要会显示公网 IP/域名、端口和路径；如果没有启用 HTTPS 域名站点，建议先建 SSH 隧道：
 
 ```bash
-ssh -L 2053:127.0.0.1:2053 root@your.server.ip
+ssh -L 面板端口:127.0.0.1:面板端口 root@your.server.ip
 ```
 
 然后浏览器打开：
 
 ```text
-http://127.0.0.1:2053/随机路径/
+http://127.0.0.1:面板端口/随机路径/
 ```
 
 如果你在安装向导选择公网面板，脚本会把监听改成 `0.0.0.0` 并在菜单里直接显示：
 
 ```text
-http://your.server.ip:2053/随机路径/
+http://your.server.ip:面板端口/随机路径/
 ```
 
 ## 域名与 HTTPS
@@ -104,15 +122,18 @@ http://your.server.ip:2053/随机路径/
 - 用官方 acme.sh 申请 Let's Encrypt 证书
 - 写入 3x-ui 容器可读证书路径
 - 自动续期
+- 自动把 `SERVER_ADDR`、面板显示地址、节点分享地址和订阅地址切到第一个域名
 - 可选自动启用 Trojan TLS 节点
 - 可选启用 443 HTTPS 伪装站点
 - 自动显示域名、IP、证书路径、面板路径和订阅转换入口
+- 自动刷新 Caddy 反代，让 3X-UI 面板导出的订阅链接变成 `https://域名/随机路径/<subId>`
 
 安全策略：
 
 - 如果启用 443 HTTPS 伪装站点，HTTP 80 只做 308 跳转到 HTTPS。
 - 如果只申请证书、不启用 HTTPS 站点，证书成功后 HTTP 80 默认返回 403，不继续提供明文页面。
 - 如果 443 被 HTTPS 站点占用，脚本会把自动生成的 VLESS REALITY 从 `443/tcp` 移到 `8443/tcp`，并重建脚本生成的 `auto-*` 入站。
+- 3X-UI 内置订阅端口默认绑定 `127.0.0.1:2096`，公网不能直接访问；公网只走 HTTPS 反代随机路径。
 
 ## 订阅转换
 
@@ -220,6 +241,8 @@ sudo ./scripts/manage.sh backup
 sudo ./scripts/manage.sh autostart
 sudo ./scripts/manage.sh domain
 sudo ./scripts/manage.sh subscription
+sudo ./scripts/manage.sh xui-subscription
+sudo ./scripts/manage.sh mask-site
 ```
 
 请只在你有合法授权的服务器和网络环境里使用。

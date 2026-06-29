@@ -42,6 +42,11 @@ SITE_HTTP_PORT="${SITE_HTTP_PORT:-80}"
 SITE_HTTPS_PORT="${SITE_HTTPS_PORT:-443}"
 HTTPS_SITE_ENABLE="${HTTPS_SITE_ENABLE:-0}"
 HTTPS_HTTP_MODE="${HTTPS_HTTP_MODE:-reject}"
+XUI_BUILTIN_SUB_LISTEN="${XUI_BUILTIN_SUB_LISTEN:-127.0.0.1}"
+XUI_BUILTIN_SUB_PORT="${XUI_BUILTIN_SUB_PORT:-2096}"
+XUI_BUILTIN_SUB_PATH="${XUI_BUILTIN_SUB_PATH:-}"
+XUI_BUILTIN_JSON_PATH="${XUI_BUILTIN_JSON_PATH:-}"
+XUI_BUILTIN_CLASH_PATH="${XUI_BUILTIN_CLASH_PATH:-}"
 
 green=$'\033[0;32m'
 cyan=$'\033[0;36m'
@@ -256,6 +261,12 @@ write_runtime_summary() {
   Default local conversion config: $(web_origin)/sub/config/3.5.yaml
   Rules editor token: ${SUB_CONFIG_ADMIN_TOKEN:-not generated yet}
   Note: If HTTPS_SITE_ENABLE=0 and HTTPS_HTTP_MODE=reject, public /sub/ is intentionally blocked after certificate setup.
+
+9) 3X-UI built-in subscription
+  Listen: ${XUI_BUILTIN_SUB_LISTEN:-127.0.0.1}:${XUI_BUILTIN_SUB_PORT:-2096}
+  Subscription URI: $(web_origin)${XUI_BUILTIN_SUB_PATH:-/xui-sub/}
+  JSON URI: $(web_origin)${XUI_BUILTIN_JSON_PATH:-/xui-json/}
+  Clash URI: $(web_origin)${XUI_BUILTIN_CLASH_PATH:-/xui-clash/}
 EOF
   chmod 600 runtime/install-summary.txt
 }
@@ -280,7 +291,7 @@ show_header() {
   echo "${green}12. 刷新IP配置及参数显示 / 节点链接${plain}"
   echo "${green}13. 开机自启动设置【启用/禁用/查看】${plain}"
   echo "${green}14. 显示使用说明和安全建议${plain}"
-  echo "${green}15. 订阅转换 Web 界面【ACL4SSR / Clash / sing-box】${plain}"
+  echo "${green}15. 订阅转换 Web 界面 / 3X-UI内置HTTPS订阅${plain}"
   line
   echo "${green} 0. 退出脚本${plain}"
   warn_line
@@ -319,6 +330,7 @@ show_status() {
   echo "订阅转换: ${blue}$(web_origin)/sub/ ${plain}"
   echo "规则配置: ${blue}$(web_origin)/sub/config/3.5.yaml${plain}"
   echo "规则编辑Token: ${blue}${SUB_CONFIG_ADMIN_TOKEN:-未生成}${plain}"
+  echo "3X-UI内置订阅: ${blue}$(web_origin)${XUI_BUILTIN_SUB_PATH:-/xui-sub/}${plain}  监听: ${cyan}${XUI_BUILTIN_SUB_LISTEN}:${XUI_BUILTIN_SUB_PORT}${plain}"
 }
 
 show_menu() {
@@ -559,7 +571,7 @@ autostart_menu() {
 }
 
 subscription_menu() {
-  echo "${cyan}订阅转换 Web 界面${plain}"
+  echo "${cyan}订阅转换 Web 界面 / 3X-UI内置HTTPS订阅${plain}"
   if [ "${ENABLE_SUBCONVERTER:-1}" != "1" ]; then
     echo "${yellow}ENABLE_SUBCONVERTER=0，当前未启用。${plain}"
     read -r -p "是否启用订阅转换？[Y/n]: " yn </dev/tty || yn=""
@@ -567,6 +579,11 @@ subscription_menu() {
     set_env_var ENABLE_SUBCONVERTER "1"
   fi
   ./scripts/subscription.sh
+  if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
+    ./scripts/xui-builtin-subscription.sh || true
+  else
+    echo "${yellow}HTTPS站点未启用，3X-UI内置订阅保持本机监听，不生成公网HTTP链接。${plain}"
+  fi
   refresh_env
   write_runtime_summary
 }
@@ -584,6 +601,7 @@ show_help() {
   ./scripts/manage.sh autostart
   ./scripts/manage.sh domain
   ./scripts/manage.sh subscription
+  ./scripts/manage.sh xui-subscription
 
 安全建议:
   1. 面板默认绑定 127.0.0.1，通过 SSH 隧道访问。
@@ -592,6 +610,7 @@ show_help() {
   4. Trojan/Hysteria2 建议使用真实可信 TLS 证书。
   5. 输入域名申请证书前，请先把域名 A 记录解析到当前 VPS 公网 IP。
   6. 配置 HTTPS 证书后，80 端口默认拒绝 HTTP 明文访问；只有手动选择 HTTPS 伪装站点时才跳转到 HTTPS。
+  7. 3X-UI 内置订阅服务绑定 127.0.0.1，并通过 HTTPS 随机路径反代，避免导出 http://:2096 链接。
 
 自启动:
   1. Docker Compose 已设置 restart: unless-stopped。
@@ -616,8 +635,8 @@ main_loop() {
       8) ./scripts/manage.sh backup; pause ;;
       9) docker compose logs --tail=200 3xui; pause ;;
       10) domain_cert_menu; pause ;;
-      11) docker compose --profile site up -d caddy-site; pause ;;
-      12) ./scripts/apply-presets.sh; ./scripts/subscription.sh; show_status; show_links; pause ;;
+      11) ./scripts/mask-site.sh; docker compose --profile site up -d caddy-site; pause ;;
+      12) ./scripts/apply-presets.sh; ./scripts/subscription.sh; [ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && ./scripts/xui-builtin-subscription.sh || true; show_status; show_links; pause ;;
       13) autostart_menu; pause ;;
       14) show_help; pause ;;
       15) subscription_menu; pause ;;

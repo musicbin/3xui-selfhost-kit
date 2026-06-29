@@ -26,6 +26,12 @@ plain=$'\033[0m'
 
 log() { printf '[domain-cert] %s\n' "$*"; }
 
+random_port() {
+  local hex
+  hex="$(openssl rand -hex 2)"
+  printf '%d' $((20000 + 0x${hex} % 30000))
+}
+
 set_env_var() {
   local key="$1"
   local value="$2"
@@ -84,40 +90,50 @@ yes_no() {
 
 write_mask_page() {
   local primary="$1"
-  mkdir -p site
-  cat > site/index.html <<EOF
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${primary:-Service} Status</title>
-  <style>
-    :root { color-scheme: light dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f6f7f9; color: #1f2937; }
-    main { width: min(760px, calc(100vw - 40px)); }
-    h1 { font-size: 42px; margin: 0 0 12px; letter-spacing: 0; }
-    p { font-size: 16px; line-height: 1.7; margin: 0; color: #4b5563; }
-    @media (prefers-color-scheme: dark) {
-      body { background: #101216; color: #f3f4f6; }
-      p { color: #cbd5e1; }
-    }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>Service online</h1>
-    <p>This host is serving a normal static page. Administrative access is not exposed from this page.</p>
-  </main>
-</body>
-</html>
+  if [ -x ./scripts/mask-site.sh ]; then
+    MASK_SITE_BRAND="${MASK_SITE_BRAND:-Hearthline Goods}" ./scripts/mask-site.sh
+  else
+    mkdir -p site
+    printf '<!doctype html><title>%s</title><h1>%s</h1>\n' "${primary:-Service}" "${primary:-Service}" > site/index.html
+  fi
+}
+
+normalize_uri_path() {
+  local path="$1"
+  [ -n "$path" ] || return 1
+  case "$path" in /*) : ;; *) path="/$path" ;; esac
+  case "$path" in */) : ;; *) path="$path/" ;; esac
+  printf '%s' "$path"
+}
+
+xui_builtin_sub_caddy_block() {
+  [ "${XUI_BUILTIN_SUB_ENABLE:-1}" = "1" ] || return 0
+  [ -n "${XUI_BUILTIN_SUB_PATH:-}" ] || return 0
+  [ -n "${XUI_BUILTIN_JSON_PATH:-}" ] || return 0
+  [ -n "${XUI_BUILTIN_CLASH_PATH:-}" ] || return 0
+
+  local sub_path json_path clash_path port
+  sub_path="$(normalize_uri_path "$XUI_BUILTIN_SUB_PATH")"
+  json_path="$(normalize_uri_path "$XUI_BUILTIN_JSON_PATH")"
+  clash_path="$(normalize_uri_path "$XUI_BUILTIN_CLASH_PATH")"
+  port="${XUI_BUILTIN_SUB_PORT:-2096}"
+
+  cat <<EOF
+	# 3xui builtin subscription start
+	@xuiBuiltinSub path ${sub_path%/} ${sub_path%/}/* ${json_path%/} ${json_path%/}/* ${clash_path%/} ${clash_path%/}/*
+	handle @xuiBuiltinSub {
+		reverse_proxy 127.0.0.1:${port}
+	}
+	# 3xui builtin subscription end
 EOF
 }
 
 write_caddyfile() {
   mkdir -p caddy
   local panel_path="${WEB_BASE_PATH:-panel}"
+  local xui_sub_block
   panel_path="${panel_path#/}"
+  xui_sub_block="$(xui_builtin_sub_caddy_block)"
   if [ "${TLS_CERT_FILE:-}" != "" ] && [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
     cat > caddy/Caddyfile <<EOF
 :80 {
@@ -132,6 +148,7 @@ write_caddyfile() {
 	handle @panelPath {
 		reverse_proxy 127.0.0.1:${PANEL_PORT:-2053}
 	}
+${xui_sub_block}
 	handle_path /subconverter/* {
 		reverse_proxy 127.0.0.1:${SUBCONVERTER_PORT:-25500}
 	}
@@ -314,6 +331,11 @@ secure_panel_for_https() {
   if [ "${HTTPS_SITE_ENABLE:-0}" != "1" ]; then
     return
   fi
+  if [ "${AUTO_RANDOMIZE_DEFAULT_PANEL_PORT:-1}" = "1" ] && [ "${PANEL_PORT:-2053}" = "2053" ]; then
+    PANEL_PORT="$(random_port)"
+    set_env_var PANEL_PORT "$PANEL_PORT"
+    log "Changed default panel port 2053 to random local port ${PANEL_PORT}."
+  fi
   set_env_var PANEL_LISTEN_IP "127.0.0.1"
   PANEL_LISTEN_IP="127.0.0.1"
   if docker inspect "$XUI_CONTAINER" >/dev/null 2>&1; then
@@ -382,12 +404,19 @@ main() {
 
   start_mask_site
 
+  if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && [ -x ./scripts/xui-builtin-subscription.sh ]; then
+    ./scripts/xui-builtin-subscription.sh || true
+  fi
+
   echo
   echo "${green}域名配置完成:${plain}"
   echo "  域名: ${domains}"
   echo "  主域名: ${primary}"
   echo "  Web入口: $(web_origin "$primary")/"
   echo "  订阅转换: $(web_origin "$primary")/sub/"
+  if [ -n "${XUI_BUILTIN_SUB_PATH:-}" ]; then
+    echo "  3X-UI内置订阅: $(web_origin "$primary")${XUI_BUILTIN_SUB_PATH#/}"
+  fi
   echo "  HTTP模式: ${HTTPS_HTTP_MODE:-reject}"
   echo "  证书: ${ROOT_DIR}/data/cert/domains/fullchain.pem"
   echo "  私钥: ${ROOT_DIR}/data/cert/domains/privkey.pem"
