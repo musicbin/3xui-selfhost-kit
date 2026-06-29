@@ -265,6 +265,36 @@ issue_cert() {
   TLS_SERVER_NAME="$primary"
 }
 
+cert_covers_domains() {
+  local domains="$1"
+  local cert="$ROOT_DIR/data/cert/domains/fullchain.pem"
+  local sans d domain_parts=()
+
+  [ -s "$cert" ] || return 1
+  command -v openssl >/dev/null 2>&1 || return 1
+  sans="$(openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null || true)"
+  [ -n "$sans" ] || return 1
+
+  IFS=',' read -r -a domain_parts <<< "$domains"
+  for d in "${domain_parts[@]}"; do
+    [ -n "$d" ] || continue
+    printf '%s\n' "$sans" | grep -F "DNS:${d}" >/dev/null || return 1
+  done
+  return 0
+}
+
+use_existing_cert() {
+  local primary="$1"
+  set_env_var TLS_CERT_FILE "/root/cert/domains/fullchain.pem"
+  set_env_var TLS_KEY_FILE "/root/cert/domains/privkey.pem"
+  set_env_var TLS_SERVER_NAME "$primary"
+  set_env_var ENABLE_ACME "1"
+
+  TLS_CERT_FILE="/root/cert/domains/fullchain.pem"
+  TLS_KEY_FILE="/root/cert/domains/privkey.pem"
+  TLS_SERVER_NAME="$primary"
+}
+
 configure_firewall_ports() {
   if [ "${CONFIGURE_FIREWALL:-1}" != "1" ]; then
     return
@@ -389,7 +419,12 @@ main() {
   write_mask_page "$primary"
 
   if [ "${ENABLE_ACME:-1}" = "1" ]; then
-    issue_cert "$domains" "$primary"
+    if cert_covers_domains "$domains"; then
+      log "Existing certificate already covers: ${domains}"
+      use_existing_cert "$primary"
+    else
+      issue_cert "$domains" "$primary"
+    fi
   fi
 
   if [ "$AUTO_ENABLE_TROJAN" = "1" ]; then
