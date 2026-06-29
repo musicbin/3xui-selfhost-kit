@@ -47,6 +47,7 @@ XUI_BUILTIN_SUB_PORT="${XUI_BUILTIN_SUB_PORT:-2096}"
 XUI_BUILTIN_SUB_PATH="${XUI_BUILTIN_SUB_PATH:-}"
 XUI_BUILTIN_JSON_PATH="${XUI_BUILTIN_JSON_PATH:-}"
 XUI_BUILTIN_CLASH_PATH="${XUI_BUILTIN_CLASH_PATH:-}"
+SERVER_ALIASES="${SERVER_ALIASES:-}"
 
 green=$'\033[0;32m'
 cyan=$'\033[0;36m'
@@ -283,7 +284,7 @@ show_header() {
   echo "${green} 4. 修改面板设置【用户名密码、登录端口、根路径、监听IP】${plain}"
   echo "${green} 5. 套用协议预设【VLESS Reality、Hysteria2、Trojan、SS、链式代理】${plain}"
   echo "${green} 6. 启动、停止、重启 3x-ui${plain}"
-  echo "${green} 7. 更新官方 3x-ui 镜像并重启${plain}"
+  echo "${green} 7. 安全更新官方 3x-ui 镜像【后台执行并自动修复配置】${plain}"
   echo "${green} 8. 备份数据库和 .env 配置${plain}"
   echo "${green} 9. 查看 3x-ui 日志${plain}"
   echo "${green}10. 管理 Acme 申请域名证书【支持多域名 / 自动续期】${plain}"
@@ -292,6 +293,9 @@ show_header() {
   echo "${green}13. 开机自启动设置【启用/禁用/查看】${plain}"
   echo "${green}14. 显示使用说明和安全建议${plain}"
   echo "${green}15. 订阅转换 Web 界面 / 3X-UI内置HTTPS订阅${plain}"
+  echo "${green}16. 官方更新/系统更新后自检并恢复配置${plain}"
+  echo "${green}17. 检查域名 A/AAAA、IPv4/IPv6、端口监听${plain}"
+  echo "${green}18. 刷新全部入站订阅链接【使用 3.5.yaml 规则】${plain}"
   line
   echo "${green} 0. 退出脚本${plain}"
   warn_line
@@ -325,6 +329,7 @@ show_status() {
   echo "客户端链接: ${blue}${ROOT_DIR}/runtime/client-links.txt${plain}"
   echo "面板导出链接: ${blue}${ROOT_DIR}/runtime/panel-all-links.txt${plain}"
   echo "绑定域名: ${blue}${DOMAIN_NAMES:-未配置}${plain}"
+  echo "订阅域名别名: ${blue}${SERVER_ALIASES:-${DOMAIN_NAMES:-未配置}}${plain}"
   echo "TLS证书: ${blue}${TLS_CERT_FILE:-未配置}${plain}"
   echo "HTTPS站点: ${blue}${HTTPS_SITE_ENABLE:-0}${plain}  HTTP模式: ${blue}${HTTPS_HTTP_MODE:-reject}${plain}"
   echo "订阅转换: ${blue}$(web_origin)/sub/ ${plain}"
@@ -646,7 +651,7 @@ main_loop() {
   while true; do
     refresh_env
     show_menu
-    read -r -p "请输入选项 [0-15]: " choice </dev/tty || choice="0"
+    read -r -p "请输入选项 [0-18]: " choice </dev/tty || choice="0"
     case "$choice" in
       1) install_or_start; pause ;;
       2) uninstall_xui; pause ;;
@@ -663,6 +668,9 @@ main_loop() {
       13) autostart_menu; pause ;;
       14) show_help; pause ;;
       15) subscription_menu; pause ;;
+      16) ./scripts/reconcile.sh; pause ;;
+      17) ./scripts/network-check.sh; pause ;;
+      18) ./scripts/manage.sh refresh-links; show_links; pause ;;
       0) exit 0 ;;
       *) echo "${yellow}无效选项。${plain}"; pause ;;
     esac

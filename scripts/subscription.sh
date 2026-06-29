@@ -12,12 +12,20 @@ if [ -f .env ]; then
 fi
 
 SERVER_ADDR="${SERVER_ADDR:-your-server}"
+DOMAIN_NAMES="${DOMAIN_NAMES:-}"
+XUI_CONTAINER="${XUI_CONTAINER:-3xui}"
+PANEL_PORT="${PANEL_PORT:-2053}"
+WEB_BASE_PATH="${WEB_BASE_PATH:-panel}"
 SITE_HTTP_PORT="${SITE_HTTP_PORT:-80}"
 SITE_HTTPS_PORT="${SITE_HTTPS_PORT:-443}"
 HTTPS_SITE_ENABLE="${HTTPS_SITE_ENABLE:-0}"
 SUBSCRIPTION_TOKEN="${SUBSCRIPTION_TOKEN:-}"
 ENABLE_SUB_CONFIG_EDITOR="${ENABLE_SUB_CONFIG_EDITOR:-1}"
 SUB_CONFIG_ADMIN_TOKEN="${SUB_CONFIG_ADMIN_TOKEN:-}"
+SERVER_ALIASES="${SERVER_ALIASES:-}"
+SUBSCRIPTION_EXPAND_ALIASES="${SUBSCRIPTION_EXPAND_ALIASES:-1}"
+XUI_API_BASE="${XUI_API_BASE:-}"
+XUI_API_TOKEN="${XUI_API_TOKEN:-}"
 
 set_env_var() {
   local key="$1"
@@ -40,6 +48,35 @@ set_env_var() {
 
 new_token() {
   openssl rand -hex 16
+}
+
+normalize_aliases() {
+  local values="$1"
+  printf '%s' "$values" | tr ',，;； ' '\n' | awk 'NF && !seen[$0]++ { printf "%s%s", sep, $0; sep="," }'
+}
+
+ensure_xui_api_env() {
+  local aliases token out
+  XUI_API_BASE="${XUI_API_BASE:-http://127.0.0.1:${PANEL_PORT}/${WEB_BASE_PATH#/}}"
+  set_env_var XUI_API_BASE "$XUI_API_BASE"
+
+  if [ -z "$SERVER_ALIASES" ]; then
+    aliases="$(normalize_aliases "${DOMAIN_NAMES:-$SERVER_ADDR}")"
+    SERVER_ALIASES="${aliases:-$SERVER_ADDR}"
+  fi
+  set_env_var SERVER_ALIASES "$SERVER_ALIASES"
+  set_env_var SUBSCRIPTION_EXPAND_ALIASES "$SUBSCRIPTION_EXPAND_ALIASES"
+
+  if [ -z "$XUI_API_TOKEN" ] && docker inspect "$XUI_CONTAINER" >/dev/null 2>&1; then
+    out="$(docker exec "$XUI_CONTAINER" /app/x-ui setting -getApiToken true 2>/dev/null || true)"
+    token="$(printf '%s\n' "$out" | awk '/apiToken:/ {print $2}' | tail -n1)"
+    if [ -n "$token" ]; then
+      XUI_API_TOKEN="$token"
+      set_env_var XUI_API_TOKEN "$XUI_API_TOKEN"
+    fi
+  elif [ -n "$XUI_API_TOKEN" ]; then
+    set_env_var XUI_API_TOKEN "$XUI_API_TOKEN"
+  fi
 }
 
 public_origin_hint() {
@@ -188,12 +225,16 @@ write_web_ui() {
       </div>
     </div>
     <button onclick="build()">生成转换链接</button>
+    <button onclick="refreshLinks()">刷新全部入站链接</button>
     <button class="secondary" onclick="copyResult()">复制</button>
+    <button class="secondary" onclick="copyClash35()">复制 3.5 订阅</button>
     <button class="secondary" onclick="saveDefaults()">保存为默认</button>
     <a class="button" href="https://acl4ssr-sub.github.io/" target="_blank" rel="noreferrer">打开 ACL4SSR 公共页面</a>
     <a class="button" href="/sub/config/3.5.yaml" target="_blank" rel="noreferrer">查看 3.5.yaml</a>
     <label>转换链接</label>
     <code id="result"></code>
+    <label>全部入站订阅</label>
+    <code id="allLinksStatus">使用规则编辑 Token 可从 3X-UI 刷新全部入站链接，并自动扩展到 SERVER_ALIASES 中的多个域名/前缀。</code>
     <section class="editor">
       <h1>3.5.yaml 规则</h1>
       <p>转换链接默认使用这份规则配置。保存时请保留节点名称，分流组会按这些名称匹配。</p>
@@ -248,6 +289,26 @@ write_web_ui() {
       if (!resultEl.textContent) build();
       await navigator.clipboard.writeText(resultEl.textContent);
     }
+    async function copyClash35() {
+      await navigator.clipboard.writeText(clash35);
+      resultEl.textContent = clash35;
+    }
+    async function refreshLinks() {
+      try {
+        const response = await fetch(location.origin + "/subconfig-api/refresh-links", {
+          method: "POST",
+          headers: {"X-Admin-Token": adminTokenEl.value.trim()}
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || response.statusText);
+        localStorage.setItem("xuiSubConfigAdminToken", adminTokenEl.value.trim());
+        document.getElementById("allLinksStatus").textContent =
+          "已刷新 " + data.count + " 条链接。原始订阅: " + rawSub + "    3.5.yaml订阅: " + clash35;
+        resultEl.textContent = clash35;
+      } catch (error) {
+        document.getElementById("allLinksStatus").textContent = "刷新失败: " + error.message;
+      }
+    }
     function saveDefaults() {
       localStorage.setItem("xuiSubSource", urlEl.value.trim());
       localStorage.setItem("xuiSubTarget", targetEl.value);
@@ -299,11 +360,12 @@ start_subscription_services() {
   docker compose up -d subconverter
   if [ "${ENABLE_SUB_CONFIG_EDITOR:-1}" = "1" ]; then
     docker compose pull subconfig-api
-    docker compose up -d subconfig-api
+    docker compose up -d --force-recreate subconfig-api
   fi
 }
 
 main() {
+  ensure_xui_api_env
   write_subscription_files
   write_web_ui
   start_subscription_services

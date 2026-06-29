@@ -12,20 +12,22 @@ services:
     image: ${SUB_CONFIG_API_IMAGE:-python:3-alpine}
     container_name: ${SUB_CONFIG_API_CONTAINER:-3xui_subconfig_api}
     command: ["python", "/app/subconfig-api.py"]
+    network_mode: host
     environment:
       SUB_CONFIG_PATH: /config/3.5.yaml
       SUB_CONFIG_ADMIN_TOKEN: ${SUB_CONFIG_ADMIN_TOKEN:-}
       SUBSCRIPTION_TOKEN: ${SUBSCRIPTION_TOKEN:-}
       SUBSCRIPTION_DIR: /subscriptions
+      SUB_CONFIG_HOST: "127.0.0.1"
       SUB_CONFIG_PORT: "27880"
-    expose:
-      - "27880"
-    ports:
-      - "127.0.0.1:${SUB_CONFIG_PORT:-27880}:27880"
+      XUI_API_BASE: ${XUI_API_BASE:-http://127.0.0.1:${PANEL_PORT:-2053}/${WEB_BASE_PATH:-panel}}
+      XUI_API_TOKEN: ${XUI_API_TOKEN:-}
+      SERVER_ALIASES: ${SERVER_ALIASES:-}
+      SUBSCRIPTION_EXPAND_ALIASES: ${SUBSCRIPTION_EXPAND_ALIASES:-1}
     volumes:
       - ./scripts/subconfig-api.py:/app/subconfig-api.py:ro
       - ./site/sub/config:/config
-      - ./site/subscriptions:/subscriptions:ro
+      - ./site/subscriptions:/subscriptions
     restart: unless-stopped
 
   3xui:

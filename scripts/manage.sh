@@ -34,9 +34,12 @@ Commands:
   menu           Open terminal menu panel
   status         Show container status and panel URL hint
   logs           Tail 3x-ui logs
-  update         Pull latest official image and restart
+  update         Start safe official-image update in background
+  safe-update    Start safe official-image update in background
+  reconcile      Re-apply local hardening after image/system changes
   backup         Backup local SQLite database and .env
   apply-presets  Re-apply protocol presets from .env
+  refresh-links  Refresh all inbound links for /sub/ and 3.5.yaml render
   links          Print generated client links
   token          Generate a fresh 3x-ui API token
   autostart      Open boot autostart settings
@@ -44,6 +47,7 @@ Commands:
   subscription   Generate local subscription converter web UI
   xui-subscription Configure 3x-ui built-in subscription behind HTTPS
   mask-site      Regenerate the static masquerade site
+  network-check  Check A/AAAA records, IPv4/IPv6, and local listeners
   protocol-guard Disable or delete unsafe inbound protocols
 EOF
 }
@@ -75,18 +79,11 @@ case "$cmd" in
   logs)
     docker compose logs -f --tail=200 3xui
     ;;
-  update)
-    ./scripts/manage.sh backup
-    docker compose pull 3xui
-    docker compose up -d 3xui
-    docker exec "$XUI_CONTAINER" /app/x-ui setting -show true >/dev/null
-    if [ "${ENABLE_PROTOCOL_GUARD:-1}" = "1" ] && [ -x ./scripts/protocol-guard.sh ]; then
-      ./scripts/protocol-guard.sh || true
-    fi
-    if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && [ -x ./scripts/xui-builtin-subscription.sh ]; then
-      ./scripts/xui-builtin-subscription.sh || true
-    fi
-    echo "Updated official 3x-ui image and restarted."
+  update|safe-update)
+    ./scripts/safe-update.sh
+    ;;
+  reconcile)
+    ./scripts/reconcile.sh
     ;;
   backup)
     ts="$(date +%Y%m%d-%H%M%S)"
@@ -100,6 +97,11 @@ case "$cmd" in
     ;;
   apply-presets)
     ./scripts/apply-presets.sh
+    ;;
+  refresh-links)
+    ./scripts/apply-presets.sh
+    ./scripts/subscription.sh
+    echo "All inbound links refreshed for /sub/ and 3.5.yaml render."
     ;;
   links)
     if [ -f runtime/install-summary.txt ]; then
@@ -145,6 +147,9 @@ case "$cmd" in
     ;;
   protocol-guard)
     ./scripts/protocol-guard.sh
+    ;;
+  network-check)
+    ./scripts/network-check.sh
     ;;
   *)
     usage

@@ -26,6 +26,14 @@ curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/ins
   | sudo env CONFIG_WIZARD=0 DOMAIN_NAMES=heubhkldhuu.shop,www.heubhkldhuu.shop MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
 ```
 
+多个域名、多个前缀都写进 `DOMAIN_NAMES`，例如：
+
+```bash
+DOMAIN_NAMES=example.com,www.example.com,a.example.com,b.example.com
+```
+
+脚本会把这些域名写入证书、Caddy HTTPS 站点和 `SERVER_ALIASES`。订阅 Web 刷新时会为每个域名/前缀生成对应的安全协议链接，不为每个域名重复占用端口，避免端口冲突。
+
 只要提供了 `DOMAIN_NAMES`，安装脚本会自动：
 
 - 用第一个域名作为面板、节点和订阅显示地址
@@ -79,6 +87,7 @@ sudo ./scripts/manage.sh links
 - 安全协议守护：默认禁用 `vmess/http/mixed/mtproto/tun` 入站，保留 `vless/trojan/shadowsocks/wireguard/hysteria/tunnel`
 - `dokodemo-door` 转发预设；在 3X-UI 官方面板中协议名显示为 `tunnel`
 - `3.5.yaml` 规则配置 Web 编辑器，使用安装时生成的编辑 token
+- Web 一键刷新全部 3X-UI 入站链接，并用本地 `3.5.yaml` 渲染 Clash 订阅
 - Docker `restart: unless-stopped`
 - systemd 自启动服务：`3xui-kit.service`
 
@@ -118,6 +127,17 @@ http://your.server.ip:面板端口/随机路径/
 ```text
 10. 管理 Acme 申请域名证书
 ```
+
+每一个要访问的前缀都必须有 DNS 记录并写进 `DOMAIN_NAMES`，例如 `www.example.com`、`a.example.com`。如果只写 `example.com`，证书不会自动覆盖 `www` 或其他前缀。除非你自行配置 DNS API 申请通配符证书，否则本项目默认使用 HTTP-01，按域名逐个申请证书。
+
+IPv6 也支持，但 VPS 必须真的有公网 IPv6，并且每个域名/前缀都要添加 AAAA 记录。检查命令：
+
+```bash
+cd /opt/3xui-selfhost-kit
+sudo ./scripts/manage.sh network-check
+```
+
+如果域名套了 Cloudflare 橙云代理，网页可能能打开，但 VLESS/Trojan/Shadowsocks 这类非 HTTP 代理协议通常会失败。节点域名建议保持 DNS-only。
 
 输入一个或多个域名后，脚本会：
 
@@ -254,7 +274,40 @@ cd /opt/3xui-selfhost-kit
 sudo ./scripts/manage.sh update
 ```
 
-这会备份本地数据库，然后拉取最新官方 3x-ui 镜像并重启。
+这会先备份本地数据库和 `.env`，然后在后台拉取最新官方 3x-ui 镜像，并自动运行：
+
+- 面板端口/路径/监听 IP 恢复
+- 域名 HTTPS/Caddy 恢复
+- VLESS/Trojan/Shadowsocks/dokodemo 预设幂等检查
+- 不安全协议守护
+- `/sub/` 订阅和 `3.5.yaml` 渲染刷新
+- 3X-UI 内置订阅 HTTPS URI 修复
+
+如果官方版本升级导致 API 暂时不兼容，脚本不会覆盖你的数据库备份；查看日志：
+
+```bash
+tail -f /opt/3xui-selfhost-kit/runtime/safe-update.log
+sudo ./scripts/manage.sh reconcile
+```
+
+严格来说，任何第三方官方项目的未来破坏性更新都无法“数学保证永不失效”，但本项目把所有自定义配置放在 `.env`、脚本、Caddy、订阅 API 里，更新后会自动重放配置，并保留更新前备份用于回滚。
+
+## 全部入站订阅
+
+Web 入口：
+
+```text
+https://your.domain/sub/
+```
+
+在页面输入“规则编辑 Token”，点击“刷新全部入站链接”，会从 3X-UI 读取所有可订阅入站，并使用 `SERVER_ALIASES` 为多个域名/前缀生成链接。`dokodemo-door/tunnel` 是转发入站，没有客户端订阅 URL。
+
+命令行刷新：
+
+```bash
+cd /opt/3xui-selfhost-kit
+sudo ./scripts/manage.sh refresh-links
+```
 
 ## 常用命令
 
@@ -270,6 +323,9 @@ sudo ./scripts/manage.sh autostart
 sudo ./scripts/manage.sh domain
 sudo ./scripts/manage.sh subscription
 sudo ./scripts/manage.sh xui-subscription
+sudo ./scripts/manage.sh refresh-links
+sudo ./scripts/manage.sh reconcile
+sudo ./scripts/manage.sh network-check
 sudo ./scripts/manage.sh mask-site
 sudo ./scripts/manage.sh protocol-guard
 ```

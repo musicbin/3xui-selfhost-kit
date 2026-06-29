@@ -401,6 +401,7 @@ main() {
   email="${ACME_EMAIL:-admin@${primary}}"
 
   set_env_var DOMAIN_NAMES "$domains"
+  set_env_var SERVER_ALIASES "$domains"
   set_env_var TLS_SERVER_NAME "$primary"
   if [ "${USE_DOMAIN_FOR_LINKS:-1}" = "1" ]; then
     set_env_var SERVER_ADDR "$primary"
@@ -443,6 +444,9 @@ main() {
 
   if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && [ -x ./scripts/xui-builtin-subscription.sh ]; then
     ./scripts/xui-builtin-subscription.sh || true
+  fi
+  if [ -x ./scripts/subscription.sh ]; then
+    ./scripts/subscription.sh || true
   fi
 
   echo

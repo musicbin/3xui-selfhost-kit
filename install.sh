@@ -100,6 +100,9 @@ download_project() {
     "scripts/xui-builtin-subscription.sh"
     "scripts/mask-site.sh"
     "scripts/protocol-guard.sh"
+    "scripts/network-check.sh"
+    "scripts/reconcile.sh"
+    "scripts/safe-update.sh"
     "scripts/subconfig-api.py"
     "scripts/start-services.sh"
     "scripts/menu.sh"
@@ -521,6 +524,10 @@ ENABLE_SUB_CONFIG_EDITOR=${ENABLE_SUB_CONFIG_EDITOR:-1}
 SUB_CONFIG_API_IMAGE=${SUB_CONFIG_API_IMAGE:-python:3-alpine}
 SUB_CONFIG_PORT=${SUB_CONFIG_PORT:-27880}
 SUB_CONFIG_ADMIN_TOKEN=${SUB_CONFIG_ADMIN_TOKEN:-}
+SERVER_ALIASES=${SERVER_ALIASES:-${DOMAIN_NAMES:-${SERVER_ADDR:-${server_addr_default}}}}
+SUBSCRIPTION_EXPAND_ALIASES=${SUBSCRIPTION_EXPAND_ALIASES:-1}
+XUI_API_BASE=${XUI_API_BASE:-http://127.0.0.1:${PANEL_PORT:-2053}/${base_path}}
+XUI_API_TOKEN=${XUI_API_TOKEN:-}
 XUI_BUILTIN_SUB_ENABLE=${XUI_BUILTIN_SUB_ENABLE:-1}
 XUI_BUILTIN_SUB_LISTEN=${XUI_BUILTIN_SUB_LISTEN:-127.0.0.1}
 XUI_BUILTIN_SUB_PORT=${XUI_BUILTIN_SUB_PORT:-2096}

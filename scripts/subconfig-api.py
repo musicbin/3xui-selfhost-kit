@@ -4,7 +4,9 @@ import os
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, quote, unquote, urlparse, urlunparse
+from urllib.request import Request, urlopen
 import base64
 import json
 import re
@@ -15,6 +17,10 @@ ADMIN_TOKEN = os.environ.get("SUB_CONFIG_ADMIN_TOKEN", "")
 SUBSCRIPTION_TOKEN = os.environ.get("SUBSCRIPTION_TOKEN", "")
 SUBSCRIPTION_DIR = Path(os.environ.get("SUBSCRIPTION_DIR", "/subscriptions"))
 MAX_BYTES = int(os.environ.get("SUB_CONFIG_MAX_BYTES", "2097152"))
+XUI_API_BASE = os.environ.get("XUI_API_BASE", "").rstrip("/")
+XUI_API_TOKEN = os.environ.get("XUI_API_TOKEN", "")
+SERVER_ALIASES = os.environ.get("SERVER_ALIASES", "")
+EXPAND_ALIASES = os.environ.get("SUBSCRIPTION_EXPAND_ALIASES", "1") == "1"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -27,6 +33,15 @@ class Handler(BaseHTTPRequestHandler):
         data = body.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def send_json(self, status, obj):
+        data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
@@ -66,6 +81,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/render/clash":
             self.render_clash(parsed)
             return
+        if path == "/links":
+            self.get_links()
+            return
         if path != "/config":
             self.send_text(404, "Not found.")
             return
@@ -77,6 +95,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_text(200, CONFIG_PATH.read_text(encoding="utf-8"), "text/yaml; charset=utf-8")
 
     def do_POST(self):
+        path = urlparse(self.path).path
+        if path == "/refresh-links":
+            self.refresh_links()
+            return
         self.do_PUT()
 
     def do_PUT(self):
@@ -119,6 +141,22 @@ class Handler(BaseHTTPRequestHandler):
         os.chmod(CONFIG_PATH, 0o644)
         self.send_text(200, "Saved.")
 
+    def get_links(self):
+        if not self.require_auth():
+            return
+        links = read_subscription_links()
+        self.send_json(200, {"success": True, "links": links, "count": len(links)})
+
+    def refresh_links(self):
+        if not self.require_auth():
+            return
+        try:
+            links = refresh_subscription_links()
+        except Exception as exc:
+            self.send_json(500, {"success": False, "error": str(exc)})
+            return
+        self.send_json(200, {"success": True, "count": len(links), "links": links})
+
     def render_clash(self, parsed):
         params = parse_qs(parsed.query)
         token = params.get("token", [""])[0]
@@ -141,6 +179,158 @@ class Handler(BaseHTTPRequestHandler):
             self.send_text(500, f"Render failed: {exc}")
             return
         self.send_text(200, rendered, "text/yaml; charset=utf-8")
+
+
+def subscription_txt_path():
+    return SUBSCRIPTION_DIR / f"{SUBSCRIPTION_TOKEN}.txt"
+
+
+def subscription_b64_path():
+    return SUBSCRIPTION_DIR / f"{SUBSCRIPTION_TOKEN}.b64"
+
+
+def read_subscription_links():
+    path = subscription_txt_path()
+    if not path.exists():
+        return []
+    links = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if re.match(r"^(vless|vmess|trojan|ss|hysteria2)://", line):
+            links.append(line)
+    return links
+
+
+def xui_json(path):
+    if not XUI_API_BASE or not XUI_API_TOKEN:
+        raise RuntimeError("XUI_API_BASE or XUI_API_TOKEN is not configured.")
+    req = Request(
+        XUI_API_BASE + path,
+        headers={"Authorization": "Bearer " + XUI_API_TOKEN, "Accept": "application/json"},
+    )
+    try:
+        with urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"3X-UI API {path} failed: HTTP {exc.code} {body}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"3X-UI API {path} failed: {exc}") from exc
+
+
+def fetch_xui_links():
+    links = []
+    try:
+        data = xui_json("/panel/api/inbounds/allLinks")
+        if data.get("success") and isinstance(data.get("obj"), list):
+            links.extend(str(v) for v in data["obj"] if isinstance(v, str))
+    except Exception:
+        links = []
+    if links:
+        return unique_links(links)
+
+    inbounds = xui_json("/panel/api/inbounds/list")
+    emails = []
+    for inbound in inbounds.get("obj", []) or []:
+        settings = inbound.get("settings") or {}
+        for client in settings.get("clients") or []:
+            email = client.get("email")
+            if email and email not in emails:
+                emails.append(email)
+    for email in emails:
+        data = xui_json("/panel/api/clients/links/" + quote(email, safe=""))
+        if data.get("success") and isinstance(data.get("obj"), list):
+            links.extend(str(v) for v in data["obj"] if isinstance(v, str))
+    return unique_links(links)
+
+
+def aliases():
+    values = []
+    for raw in re.split(r"[,，;；\s]+", SERVER_ALIASES or ""):
+        raw = raw.strip()
+        if raw and raw not in values:
+            values.append(raw)
+    return values
+
+
+def split_netloc(netloc):
+    userinfo = ""
+    hostport = netloc
+    if "@" in netloc:
+        userinfo, hostport = netloc.rsplit("@", 1)
+    if hostport.startswith("["):
+        end = hostport.find("]")
+        host = hostport[1:end]
+        port = hostport[end + 2:] if end >= 0 and hostport[end + 1:end + 2] == ":" else ""
+    else:
+        if ":" in hostport:
+            host, port = hostport.rsplit(":", 1)
+        else:
+            host, port = hostport, ""
+    return userinfo, host, port
+
+
+def format_host(host):
+    if ":" in host and not (host.startswith("[") and host.endswith("]")):
+        return "[" + host + "]"
+    return host
+
+
+def replace_link_host(link, host):
+    parsed = urlparse(link)
+    if not parsed.scheme or not parsed.netloc:
+      return link
+    userinfo, _, port = split_netloc(parsed.netloc)
+    netloc = ""
+    if userinfo:
+        netloc += userinfo + "@"
+    netloc += format_host(host)
+    if port:
+        netloc += ":" + port
+    fragment = unquote(parsed.fragment or "")
+    suffix = "@" + host
+    if fragment and not fragment.endswith(suffix):
+        fragment += suffix
+    elif not fragment:
+        fragment = host
+    return urlunparse((parsed.scheme, netloc, parsed.path, parsed.params, parsed.query, quote(fragment, safe="")))
+
+
+def unique_links(links):
+    out = []
+    seen = set()
+    for link in links:
+        if link and link not in seen:
+            seen.add(link)
+            out.append(link)
+    return out
+
+
+def expand_links_for_aliases(links):
+    host_aliases = aliases()
+    if not EXPAND_ALIASES or not host_aliases:
+        return unique_links(links)
+    expanded = []
+    for link in links:
+        for host in host_aliases:
+            expanded.append(replace_link_host(link, host))
+    return unique_links(expanded)
+
+
+def write_subscription_links(links):
+    SUBSCRIPTION_DIR.mkdir(parents=True, exist_ok=True)
+    text = "\n".join(links) + ("\n" if links else "")
+    subscription_txt_path().write_text(text, encoding="utf-8")
+    subscription_b64_path().write_text(
+        base64.b64encode(text.encode("utf-8")).decode("ascii") + "\n",
+        encoding="utf-8",
+    )
+
+
+def refresh_subscription_links():
+    links = expand_links_for_aliases(fetch_xui_links())
+    write_subscription_links(links)
+    return links
 
 
 def q(value):
