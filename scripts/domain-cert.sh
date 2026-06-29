@@ -247,7 +247,9 @@ issue_cert() {
 
   mkdir -p data/cert/domains
   log "Issuing certificate for: ${domains}"
-  "$acme" --issue --webroot "$ROOT_DIR/site" "${domain_args[@]}" --keylength ec-256
+  if ! "$acme" --issue --webroot "$ROOT_DIR/site" "${domain_args[@]}" --keylength ec-256; then
+    log "Certificate issue/renewal was skipped or failed; trying to install the existing certificate."
+  fi
   "$acme" --install-cert -d "$primary" --ecc \
     --fullchain-file "$ROOT_DIR/data/cert/domains/fullchain.pem" \
     --key-file "$ROOT_DIR/data/cert/domains/privkey.pem" \
