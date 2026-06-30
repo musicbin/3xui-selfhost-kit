@@ -23,7 +23,7 @@ curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/ins
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh \
-  | sudo env CONFIG_WIZARD=0 'DOMAIN_NAMES=newctshpm.icu,heubhkldhuu.shop,www.heubhkldhuu.shop,www.newctshpm.icu,safkdsajfkajfasfdyidsf.newctshpm.icu,fsdfsfdsfxcvxvg.heubhkldhuu.shop' ENABLE_ACME=1 STRICT_DOMAIN_CERT=1 USE_DOMAIN_FOR_LINKS=1 HTTPS_SITE_ENABLE=1 HTTPS_HTTP_MODE=redirect AUTO_ENABLE_TROJAN=1 ENABLE_TROJAN=1 ENABLE_SUBCONVERTER=1 SUBSCRIPTION_EXPAND_ALIASES=1 XUI_BUILTIN_SUB_ENABLE=1 XUI_BUILTIN_ALL_NODES=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
+  | sudo env CONFIG_WIZARD=0 'DOMAIN_NAMES=fsdfsfsdfxcvxvg.heubhkldhuu.shop,heubhkldhuu.shop,www.heubhkldhuu.shop,newctshpm.icu,safkdsajfkajfasfdyidsf.newctshpm.icu,www.newctshpm.icu' ENABLE_ACME=1 STRICT_DOMAIN_CERT=1 USE_DOMAIN_FOR_LINKS=1 HTTPS_SITE_ENABLE=1 HTTPS_HTTP_MODE=redirect AUTO_ENABLE_TROJAN=1 ENABLE_TROJAN=1 ENABLE_SUBCONVERTER=1 SUBSCRIPTION_EXPAND_ALIASES=1 XUI_BUILTIN_SUB_ENABLE=1 XUI_BUILTIN_ALL_NODES=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
 ```
 
 这条命令也可以用于覆盖安装：已有 `.env` 时不会重置面板账号、密码、数据库和证书，但会把命令里显式传入的域名、HTTPS、订阅参数写回 `.env`，然后重新申请/复用证书、刷新 Caddy、刷新 `/sub/` 和 3X-UI 内置 `all-nodes` 订阅。
@@ -53,7 +53,7 @@ curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/ins
 
 注意：`DOMAIN_NAMES=...` 必须作为一个完整参数传给 `env`。长域名列表请放在引号里，不要把逗号开头的下一段单独换到新行，否则 Shell 会把下一行当作命令执行。
 
-脚本会把这些域名写入 Caddy HTTPS 站点和 `SERVER_ALIASES`。申请证书前会先检查 DNS，当前没有 A/AAAA 记录的域名会暂时跳过，避免一个坏前缀导致整张证书失败。订阅 Web 刷新时会为每个域名/前缀生成对应的安全协议链接，不为每个域名重复占用端口，避免端口冲突。
+脚本会把这些域名写入 Caddy HTTPS 站点和 `SERVER_ALIASES`。申请证书前会先检查 DNS；开启 `STRICT_DOMAIN_CERT=1` 时，所有域名必须都签进同一张证书，否则安装直接失败，避免只配置好一部分域名。订阅 Web 刷新时会为每个域名/前缀生成对应的安全协议链接，不为每个域名重复占用端口，避免端口冲突。
 
 如果某个前缀后续补好了 DNS，运行下面任一命令即可把它追加进证书：
 
