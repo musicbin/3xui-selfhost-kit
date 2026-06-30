@@ -497,7 +497,7 @@ apply_existing_env_overrides() {
   cd "$INSTALL_DIR"
   [ -f .env ] || return 0
 
-  local key value domains primary all_nodes_sub_id default_sub_id
+  local key value domains primary all_nodes_sub_id default_sub_id server_addr_default
   for key in "${INSTALL_ENV_OVERRIDE_KEYS[@]}"; do
     if has_install_override "$key"; then
       value="$(install_override_value "$key")"
@@ -534,6 +534,44 @@ apply_existing_env_overrides() {
   ensure_env_var SUBSCRIPTION_EXPAND_ALIASES "1"
   ensure_env_var XUI_BUILTIN_SUB_ENABLE "1"
   ensure_env_var XUI_BUILTIN_ALL_NODES "1"
+
+  ensure_env_var COMPOSE_PROJECT_NAME "3xui_selfhost"
+  ensure_env_var XUI_IMAGE "ghcr.io/mhsanaei/3x-ui:latest"
+  ensure_env_var XUI_CONTAINER "3xui"
+  ensure_env_var PANEL_PORT "$(random_port)"
+  ensure_env_var PANEL_LISTEN_IP "127.0.0.1"
+  ensure_env_var PANEL_USERNAME "admin_$(random_hex 4)"
+  ensure_env_var PANEL_PASSWORD "$(random_password)"
+  ensure_env_var WEB_BASE_PATH "p$(random_hex 9)"
+  server_addr_default="$(public_ip)"
+  ensure_env_var SERVER_ADDR "${server_addr_default:-127.0.0.1}"
+  ensure_env_var REALITY_PORT "443"
+  ensure_env_var REALITY_TARGET "www.cloudflare.com:443"
+  ensure_env_var REALITY_SERVER_NAMES "www.cloudflare.com,cloudflare.com"
+  ensure_env_var REALITY_SPIDER_X "/"
+  ensure_env_var ENABLE_PRESETS "1"
+  ensure_env_var ENABLE_SHADOWSOCKS "1"
+  ensure_env_var SHADOWSOCKS_PORT "8388"
+  ensure_env_var TROJAN_PORT "9443"
+  ensure_env_var HYSTERIA_PORT "8443"
+  ensure_env_var SAFE_PROTOCOLS "vless,trojan,shadowsocks,wireguard,hysteria,tunnel"
+  ensure_env_var PROTOCOL_GUARD_ACTION "disable"
+  ensure_env_var ENABLE_PROTOCOL_GUARD "1"
+  ensure_env_var SITE_HTTP_PORT "80"
+  ensure_env_var ENABLE_MASK_SITE "1"
+  ensure_env_var SUBCONVERTER_IMAGE "tindy2013/subconverter:latest"
+  ensure_env_var SUBCONVERTER_PORT "25500"
+  ensure_env_var ENABLE_SUB_CONFIG_EDITOR "1"
+  ensure_env_var SUB_CONFIG_API_IMAGE "python:3-alpine"
+  ensure_env_var SUB_CONFIG_PORT "27880"
+  ensure_env_var XUI_API_BASE "http://127.0.0.1:$(awk -F= '$1=="PANEL_PORT"{print $2; exit}' .env)/$(awk -F= '$1=="WEB_BASE_PATH"{print $2; exit}' .env)"
+  ensure_env_var XUI_BUILTIN_SUB_LISTEN "127.0.0.1"
+  ensure_env_var XUI_BUILTIN_SUB_PORT "2096"
+  ensure_env_var XUI_BUILTIN_SUB_PATH "/xui-sub-$(random_hex 6)/"
+  ensure_env_var XUI_BUILTIN_JSON_ENABLE "0"
+  ensure_env_var XUI_BUILTIN_JSON_PATH "/xui-json-$(random_hex 6)/"
+  ensure_env_var XUI_BUILTIN_CLASH_ENABLE "0"
+  ensure_env_var XUI_BUILTIN_CLASH_PATH "/xui-clash-$(random_hex 6)/"
 
   all_nodes_sub_id="$(awk -F= '$1=="ALL_NODES_SUB_ID"{print $2; exit}' .env)"
   default_sub_id="$(awk -F= '$1=="DEFAULT_SUB_ID"{print $2; exit}' .env)"
@@ -701,7 +739,8 @@ wait_panel_db() {
 
 wait_panel_http() {
   load_env
-  local url="http://127.0.0.1:${PANEL_PORT:-2053}/${WEB_BASE_PATH#/}/"
+  local base_path="${WEB_BASE_PATH:-panel}"
+  local url="http://127.0.0.1:${PANEL_PORT:-2053}/${base_path#/}/"
   local i
   log "Waiting for panel web endpoint: ${url}"
   for i in $(seq 1 90); do
@@ -716,15 +755,16 @@ wait_panel_http() {
 
 configure_panel() {
   load_env
-  local path_no_slash="${WEB_BASE_PATH#/}"
+  local path_no_slash="${WEB_BASE_PATH:-panel}"
+  path_no_slash="${path_no_slash#/}"
   log "Hardening panel login, base path, and listen IP."
-  docker exec "$XUI_CONTAINER" /app/x-ui setting \
-    -port "$PANEL_PORT" \
-    -listenIP "$PANEL_LISTEN_IP" \
-    -username "$PANEL_USERNAME" \
-    -password "$PANEL_PASSWORD" \
+  docker exec "${XUI_CONTAINER:-3xui}" /app/x-ui setting \
+    -port "${PANEL_PORT:-2053}" \
+    -listenIP "${PANEL_LISTEN_IP:-127.0.0.1}" \
+    -username "${PANEL_USERNAME:-admin}" \
+    -password "${PANEL_PASSWORD:-$(random_password)}" \
     -webBasePath "$path_no_slash" >/dev/null
-  docker restart "$XUI_CONTAINER" >/dev/null
+  docker restart "${XUI_CONTAINER:-3xui}" >/dev/null
   wait_panel_db
   wait_panel_http || true
 }
