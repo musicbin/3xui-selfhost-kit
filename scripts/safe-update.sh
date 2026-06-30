@@ -23,15 +23,65 @@ cat > "$run_file" <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 cd "$(dirname "$0")/.."
+REPO_RAW_BASE="${REPO_RAW_BASE:-https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main}"
 [ -f .env ] && {
   set -a
   . ./.env
   set +a
 }
+
+download_kit_file() {
+  local src="$1"
+  local dst="$2"
+  local tmp
+  mkdir -p "$(dirname "$dst")"
+  tmp="$(mktemp)"
+  if ! curl -fsSL "${REPO_RAW_BASE}/${src}" -o "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  mv "$tmp" "$dst"
+}
+
+sync_kit_files() {
+  local files=(
+    "compose.yaml"
+    "scripts/manage.sh"
+    "scripts/apply-presets.sh"
+    "scripts/domain-cert.sh"
+    "scripts/subscription.sh"
+    "scripts/xui-builtin-subscription.sh"
+    "scripts/mask-site.sh"
+    "scripts/protocol-guard.sh"
+    "scripts/network-check.sh"
+    "scripts/reconcile.sh"
+    "scripts/safe-update.sh"
+    "scripts/subconfig-api.py"
+    "scripts/start-services.sh"
+    "scripts/menu.sh"
+    "caddy/Caddyfile"
+    "site/index.html"
+    "site/forward/index.html"
+    "site/sub/config/3.5.yaml"
+    "README.md"
+    "SECURITY.md"
+  )
+  local f
+  for f in "${files[@]}"; do
+    download_kit_file "$f" "$f"
+  done
+  chmod +x scripts/*.sh
+}
+
 {
   echo "===== safe update started $(date -u +%FT%TZ) ====="
   echo "Current containers:"
   docker compose ps || true
+  echo
+  echo "Syncing latest 3xui-selfhost-kit scripts..."
+  if ! sync_kit_files; then
+    echo "Kit script sync failed; continuing with the existing local files."
+  fi
   echo
   echo "Pulling latest official 3X-UI image..."
   docker compose pull 3xui

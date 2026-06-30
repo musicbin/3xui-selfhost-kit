@@ -374,12 +374,20 @@ sudo docker compose up -d --force-recreate subconfig-api
 
 这会先备份本地数据库和 `.env`，然后在后台拉取最新官方 3x-ui 镜像，并自动运行：
 
+- 本仓库脚本、Web 页面和配置模板同步
 - 面板端口/路径/监听 IP 恢复
 - 域名 HTTPS/Caddy 恢复
 - VLESS/Trojan/Shadowsocks/dokodemo 预设幂等检查
 - 不安全协议守护
 - `/sub/` 订阅和 `3.5.yaml` 渲染刷新
 - 3X-UI 内置订阅 HTTPS URI 修复
+
+如果当前服务器还是很旧的脚本，出现 `set_env_var: command not found`，先用下面命令补一次仓库脚本；它会保留已有 `.env`、面板账号、密码和数据库：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh \
+  | sudo env CONFIG_WIZARD=0 MENU_AFTER_INSTALL=0 ENABLE_SYSTEMD_AUTOSTART=1 bash
+```
 
 如果官方版本升级导致 API 暂时不兼容，脚本不会覆盖你的数据库备份；查看日志：
 
