@@ -40,7 +40,14 @@ curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/ins
 
 注意：`DOMAIN_NAMES=...` 必须作为一个完整参数传给 `env`。长域名列表请放在引号里，不要把逗号开头的下一段单独换到新行，否则 Shell 会把下一行当作命令执行。
 
-脚本会把这些域名写入证书、Caddy HTTPS 站点和 `SERVER_ALIASES`。订阅 Web 刷新时会为每个域名/前缀生成对应的安全协议链接，不为每个域名重复占用端口，避免端口冲突。
+脚本会把这些域名写入 Caddy HTTPS 站点和 `SERVER_ALIASES`。申请证书前会先检查 DNS，当前没有 A/AAAA 记录的域名会暂时跳过，避免一个坏前缀导致整张证书失败。订阅 Web 刷新时会为每个域名/前缀生成对应的安全协议链接，不为每个域名重复占用端口，避免端口冲突。
+
+如果某个前缀后续补好了 DNS，运行下面任一命令即可把它追加进证书：
+
+```bash
+sudo x-ui
+# 选择 10 或 16
+```
 
 只要提供了 `DOMAIN_NAMES`，安装脚本会自动：
 

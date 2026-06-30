@@ -59,6 +59,40 @@ first_domain() {
   printf '%s' "$1" | awk -F',' '{print $1}'
 }
 
+domain_in_list() {
+  local domain="$1"
+  local domains="$2"
+  printf ',%s,' "$domains" | grep -F ",${domain}," >/dev/null
+}
+
+domain_has_dns() {
+  local domain="$1"
+  [ -n "$domain" ] || return 1
+  if command -v dig >/dev/null 2>&1; then
+    [ -n "$(dig +short A "$domain" | awk 'NF {print; exit}')" ] && return 0
+    [ -n "$(dig +short AAAA "$domain" | awk 'NF {print; exit}')" ] && return 0
+    return 1
+  fi
+  getent ahosts "$domain" >/dev/null 2>&1
+}
+
+acme_ready_domains() {
+  local domains="$1"
+  local domain_parts=() d result="" sep=""
+
+  IFS=',' read -r -a domain_parts <<< "$domains"
+  for d in "${domain_parts[@]}"; do
+    [ -n "$d" ] || continue
+    if domain_has_dns "$d"; then
+      result="${result}${sep}${d}"
+      sep=","
+    else
+      log "Skipping ${d} for this certificate request: DNS A/AAAA record not found." >&2
+    fi
+  done
+  printf '%s' "$result"
+}
+
 prompt() {
   local label="$1"
   local default="${2:-}"
@@ -440,7 +474,7 @@ secure_panel_for_https() {
 
 main() {
   local domains="${DOMAIN_NAMES:-}"
-  local primary email
+  local primary email cert_domains cert_primary
 
   if [ "${1:-}" != "--auto" ]; then
     echo "${cyan}域名 / HTTPS 证书自动配置${plain}"
@@ -455,10 +489,20 @@ main() {
 
   primary="$(first_domain "$domains")"
   email="${ACME_EMAIL:-admin@${primary}}"
+  cert_domains="$(acme_ready_domains "$domains")"
+  if [ -n "$cert_domains" ]; then
+    cert_primary="$(first_domain "$cert_domains")"
+    if ! domain_in_list "$primary" "$cert_domains"; then
+      log "Primary domain ${primary} has no DNS A/AAAA record yet; certificate will be requested for ${cert_primary} instead."
+    fi
+  else
+    cert_primary="$primary"
+    log "No configured domain currently has DNS A/AAAA records. HTTPS certificate request will be skipped."
+  fi
 
   set_env_var DOMAIN_NAMES "$domains"
   set_env_var SERVER_ALIASES "$domains"
-  set_env_var TLS_SERVER_NAME "$primary"
+  set_env_var TLS_SERVER_NAME "$cert_primary"
   if [ "${USE_DOMAIN_FOR_LINKS:-1}" = "1" ]; then
     set_env_var SERVER_ADDR "$primary"
   fi
@@ -475,17 +519,21 @@ main() {
 
   write_mask_page "$primary"
 
-  if [ "${ENABLE_ACME:-1}" = "1" ]; then
-    if cert_covers_domains "$domains"; then
-      log "Existing certificate already covers: ${domains}"
-      use_existing_cert "$primary"
+  if [ "${ENABLE_ACME:-1}" = "1" ] && [ -n "$cert_domains" ]; then
+    if [ "$cert_domains" != "$domains" ]; then
+      log "Certificate request domain list after DNS filtering: ${cert_domains}"
+      log "Fix DNS for skipped domains, then rerun x-ui option 10 or 16 to add them."
+    fi
+    if cert_covers_domains "$cert_domains"; then
+      log "Existing certificate already covers: ${cert_domains}"
+      use_existing_cert "$cert_primary"
     else
-      issue_cert "$domains" "$primary" || adopt_existing_primary_cert "$primary" "$domains" || true
+      issue_cert "$cert_domains" "$cert_primary" || adopt_existing_primary_cert "$cert_primary" "$cert_domains" || true
     fi
   fi
 
   if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && [ -z "${TLS_CERT_FILE:-}" ]; then
-    adopt_existing_primary_cert "$primary" "$domains" || true
+    adopt_existing_primary_cert "$cert_primary" "${cert_domains:-$domains}" || true
   fi
 
   if [ "$AUTO_ENABLE_TROJAN" = "1" ]; then
