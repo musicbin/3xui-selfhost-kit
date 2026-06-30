@@ -24,6 +24,8 @@ XUI_BUILTIN_JSON_ENABLE="${XUI_BUILTIN_JSON_ENABLE:-0}"
 XUI_BUILTIN_CLASH_ENABLE="${XUI_BUILTIN_CLASH_ENABLE:-0}"
 XUI_BUILTIN_RESTART="${XUI_BUILTIN_RESTART:-1}"
 XUI_BUILTIN_RESTART_DELAY="${XUI_BUILTIN_RESTART_DELAY:-15}"
+XUI_BUILTIN_ALL_NODES="${XUI_BUILTIN_ALL_NODES:-1}"
+ALL_NODES_SUB_ID="${ALL_NODES_SUB_ID:-${DEFAULT_SUB_ID:-}}"
 DEFAULT_SUB_ID="${DEFAULT_SUB_ID:-}"
 
 log() { printf '[xui-sub] %s\n' "$*"; }
@@ -122,6 +124,83 @@ truthy() {
   esac
 }
 
+ensure_subscription_ids() {
+  if [ -z "${ALL_NODES_SUB_ID:-}" ]; then
+    ALL_NODES_SUB_ID="$(openssl rand -hex 8)"
+    set_env_var ALL_NODES_SUB_ID "$ALL_NODES_SUB_ID"
+  fi
+  if [ -z "${DEFAULT_SUB_ID:-}" ]; then
+    DEFAULT_SUB_ID="$ALL_NODES_SUB_ID"
+    set_env_var DEFAULT_SUB_ID "$DEFAULT_SUB_ID"
+  fi
+  set_env_var XUI_BUILTIN_ALL_NODES "$XUI_BUILTIN_ALL_NODES"
+}
+
+api_post_json() {
+  local token="$1"
+  local base="$2"
+  local path="$3"
+  local file="$4"
+  curl -fsS --connect-timeout 3 --max-time 30 \
+    -H "Authorization: Bearer ${token}" \
+    -H "Content-Type: application/json" \
+    -X POST --data-binary "@${file}" \
+    "${base%/}${path}"
+}
+
+sync_all_subscription_id() {
+  [ "$(truthy "$XUI_BUILTIN_ALL_NODES")" = "true" ] || return 0
+  [ -n "$ALL_NODES_SUB_ID" ] || return 0
+
+  local token="$1"
+  local base="$2"
+  local updates payload id file
+
+  curl -fsS --connect-timeout 3 --max-time 30 \
+    -H "Authorization: Bearer ${token}" \
+    "${base%/}/panel/api/inbounds/list" > runtime/xui-inbounds-for-all-nodes-subid.json
+
+  updates="$(
+    jq -c --arg subId "$ALL_NODES_SUB_ID" '
+      def obj:
+        if type == "string" then (fromjson? // {}) else (. // {}) end;
+      def subscribable_client:
+        type == "object";
+      .obj[]? as $inbound
+      | ($inbound.settings | obj) as $settings
+      | ($settings.clients // []) as $clients
+      | select(($clients | any(subscribable_client and ((.subId // "") != $subId))))
+      | {
+          id: $inbound.id,
+          enable: ($inbound.enable // true),
+          remark: ($inbound.remark // ""),
+          listen: ($inbound.listen // ""),
+          port: ($inbound.port // 0),
+          shareAddr: ($inbound.shareAddr // ""),
+          shareAddrStrategy: ($inbound.shareAddrStrategy // "listen"),
+          protocol: ($inbound.protocol // ""),
+          expiryTime: ($inbound.expiryTime // 0),
+          total: ($inbound.total // 0),
+          trafficReset: ($inbound.trafficReset // "never"),
+          settings: ($settings | .clients = (($settings.clients // []) | map(if subscribable_client then .subId = $subId else . end))),
+          streamSettings: ($inbound.streamSettings | obj),
+          sniffing: ($inbound.sniffing | obj)
+        }
+    ' runtime/xui-inbounds-for-all-nodes-subid.json 2>/dev/null || true
+  )"
+
+  [ -n "$updates" ] || return 0
+  while IFS= read -r payload; do
+    [ -n "$payload" ] || continue
+    id="$(printf '%s' "$payload" | jq -r '.id // empty')"
+    [ -n "$id" ] || continue
+    file="runtime/xui-inbound-all-nodes-subid-${id}.json"
+    printf '%s\n' "$payload" > "$file"
+    log "Syncing all client subId to ALL_NODES_SUB_ID for inbound ${id}"
+    api_post_json "$token" "$base" "/panel/api/inbounds/update/${id}" "$file" | jq . || true
+  done <<< "$updates"
+}
+
 write_builtin_client_links() {
   local token="$1"
   local base="$2"
@@ -144,7 +223,9 @@ write_builtin_client_links() {
     --arg subUri "$sub_uri" \
     --arg jsonUri "$json_uri" \
     --arg clashUri "$clash_uri" \
+    --arg allNodesSubId "$ALL_NODES_SUB_ID" \
     --arg defaultSubId "$DEFAULT_SUB_ID" \
+    --argjson allNodesEnable "$(truthy "$XUI_BUILTIN_ALL_NODES")" \
     --argjson jsonEnable "$(truthy "$XUI_BUILTIN_JSON_ENABLE")" \
     --argjson clashEnable "$(truthy "$XUI_BUILTIN_CLASH_ENABLE")" '
     def settings_obj:
@@ -160,8 +241,10 @@ write_builtin_client_links() {
     | . as $clients
     | ($clients[0].subId) as $subId
     | (
-        if $defaultSubId != "" and $subId == $defaultSubId then
-          "default-all-nodes (\($clients | length) nodes)"
+        if $allNodesEnable and $allNodesSubId != "" and $subId == $allNodesSubId then
+          "all-nodes (\($clients | length) nodes)"
+        elif $defaultSubId != "" and $subId == $defaultSubId then
+          "default-managed-nodes (\($clients | length) nodes)"
         elif ($clients | length) > 1 then
           "shared-subscription (\($clients | length) nodes)"
         else
@@ -208,6 +291,8 @@ configure_panel_subscription() {
   token="$(api_token)"
   base="$(api_base)"
   wait_api "$token" "$base"
+  ensure_subscription_ids
+  sync_all_subscription_id "$token" "$base"
 
   curl -fsS --connect-timeout 3 --max-time 30 \
     -H "Authorization: Bearer ${token}" \

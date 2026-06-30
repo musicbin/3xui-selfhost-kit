@@ -328,7 +328,7 @@ sudo ./scripts/manage.sh refresh-links
 
 3X-UI 官方内置订阅的有效格式是“随机前缀 + subId”。例如 `/xui-sub-xxxx/<subId>` 才是可用订阅；只打开 `/xui-sub-xxxx/` 没有客户端上下文，官方服务会返回 404。
 
-本项目会把基础路径自动跳转到 `/sub/`，并让默认托管节点共享同一个 `DEFAULT_SUB_ID`。因此 `runtime/xui-builtin-sub-links.txt` 里的 `default-all-nodes` 链接会包含默认 VLESS REALITY、Trojan WS TLS、Shadowsocks 2022 等全部默认客户端；单独手动创建的客户端仍会按自己的 `subId` 单独显示。
+本项目会把基础路径自动跳转到 `/sub/`。默认 `XUI_BUILTIN_ALL_NODES=1`，会把所有 3X-UI 客户端同步到同一个 `ALL_NODES_SUB_ID`，因此 `runtime/xui-builtin-sub-links.txt` 里的 `all-nodes` 链接会包含默认节点、后续手动新增节点、以及重新建立后的节点。新增节点后运行 `sudo ./scripts/manage.sh refresh-links` 即可刷新 `/sub/` 和 3X-UI 内置全量订阅。
 
 ## 常用命令
 

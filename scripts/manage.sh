@@ -39,7 +39,7 @@ Commands:
   reconcile      Re-apply local hardening after image/system changes
   backup         Backup local SQLite database and .env
   apply-presets  Re-apply protocol presets from .env
-  refresh-links  Refresh all inbound links for /sub/ and 3.5.yaml render
+  refresh-links  Refresh all inbound links for /sub/, 3.5.yaml render, and 3X-UI built-in all-nodes subscription
   links          Print generated client links
   token          Generate a fresh 3x-ui API token
   autostart      Open boot autostart settings
@@ -101,7 +101,10 @@ case "$cmd" in
   refresh-links)
     ./scripts/apply-presets.sh
     ./scripts/subscription.sh
-    echo "All inbound links refreshed for /sub/ and 3.5.yaml render."
+    if [ "${XUI_BUILTIN_SUB_ENABLE:-1}" = "1" ]; then
+      ./scripts/xui-builtin-subscription.sh || true
+    fi
+    echo "All inbound links refreshed for /sub/, 3.5.yaml render, and 3X-UI built-in all-nodes subscription."
     ;;
   links)
     if [ -f runtime/install-summary.txt ]; then
