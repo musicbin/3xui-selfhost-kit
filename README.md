@@ -23,14 +23,22 @@ curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/ins
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh \
-  | sudo env CONFIG_WIZARD=0 DOMAIN_NAMES=heubhkldhuu.shop,www.heubhkldhuu.shop MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
+  | sudo env CONFIG_WIZARD=0 'DOMAIN_NAMES=heubhkldhuu.shop,www.heubhkldhuu.shop' MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
 ```
 
 多个域名、多个前缀都写进 `DOMAIN_NAMES`，例如：
 
 ```bash
-DOMAIN_NAMES=example.com,www.example.com,a.example.com,b.example.com
+curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh \
+  | sudo env \
+      CONFIG_WIZARD=0 \
+      'DOMAIN_NAMES=example.com,www.example.com,a.example.com,b.example.com' \
+      MENU_AFTER_INSTALL=1 \
+      ENABLE_SYSTEMD_AUTOSTART=1 \
+      bash
 ```
+
+注意：`DOMAIN_NAMES=...` 必须作为一个完整参数传给 `env`。长域名列表请放在引号里，不要把逗号开头的下一段单独换到新行，否则 Shell 会把下一行当作命令执行。
 
 脚本会把这些域名写入证书、Caddy HTTPS 站点和 `SERVER_ALIASES`。订阅 Web 刷新时会为每个域名/前缀生成对应的安全协议链接，不为每个域名重复占用端口，避免端口冲突。
 
