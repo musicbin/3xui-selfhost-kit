@@ -80,6 +80,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/health":
             self.send_text(200, "ok")
             return
+        if path == "/forwards":
+            self.get_forwards()
+            return
         if path == "/render/clash":
             self.render_clash(parsed)
             return
@@ -100,6 +103,12 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/refresh-links":
             self.refresh_links()
+            return
+        if path == "/forwards":
+            self.save_forward()
+            return
+        if path == "/forwards/delete":
+            self.delete_forward()
             return
         self.do_PUT()
 
@@ -148,6 +157,55 @@ class Handler(BaseHTTPRequestHandler):
             return
         links = read_subscription_links()
         self.send_json(200, {"success": True, "links": links, "count": len(links)})
+
+    def get_forwards(self):
+        if not self.require_auth():
+            return
+        try:
+            forwards = list_forwards()
+        except Exception as exc:
+            self.send_json(500, {"success": False, "error": str(exc)})
+            return
+        self.send_json(200, {"success": True, "forwards": forwards, "count": len(forwards)})
+
+    def save_forward(self):
+        if not self.require_auth():
+            return
+        try:
+            payload = self.read_json_body()
+            forward = save_forward(payload)
+        except Exception as exc:
+            self.send_json(400, {"success": False, "error": str(exc)})
+            return
+        self.send_json(200, {"success": True, "forward": forward})
+
+    def delete_forward(self):
+        if not self.require_auth():
+            return
+        try:
+            payload = self.read_json_body()
+            inbound_id = int(payload.get("id", 0))
+            if inbound_id <= 0:
+                raise ValueError("id is required.")
+            data = xui_request_json(f"/panel/api/inbounds/del/{inbound_id}", method="POST", form={})
+            restart_xray_service()
+        except Exception as exc:
+            self.send_json(400, {"success": False, "error": str(exc)})
+            return
+        self.send_json(200, {"success": True, "response": data})
+
+    def read_json_body(self):
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError as exc:
+            raise ValueError("Bad Content-Length.") from exc
+        if length <= 0 or length > 65536:
+            raise ValueError("Request body is empty or too large.")
+        raw = self.rfile.read(length)
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("Request body must be JSON.") from exc
 
     def refresh_links(self):
         if not self.require_auth():
@@ -204,11 +262,25 @@ def read_subscription_links():
 
 
 def xui_json(path):
+    return xui_request_json(path)
+
+
+def xui_request_json(path, method="GET", data=None, form=None):
     if not XUI_API_BASE or not XUI_API_TOKEN:
         raise RuntimeError("XUI_API_BASE or XUI_API_TOKEN is not configured.")
+    body = None
+    headers = {"Authorization": "Bearer " + XUI_API_TOKEN, "Accept": "application/json"}
+    if data is not None:
+        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        headers["Content-Type"] = "application/json; charset=utf-8"
+    elif form is not None:
+        body = urlencode(form).encode("utf-8")
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
     req = Request(
         XUI_API_BASE + path,
-        headers={"Authorization": "Bearer " + XUI_API_TOKEN, "Accept": "application/json"},
+        data=body,
+        headers=headers,
+        method=method,
     )
     try:
         with urlopen(req, timeout=10) as resp:
@@ -218,6 +290,169 @@ def xui_json(path):
         raise RuntimeError(f"3X-UI API {path} failed: HTTP {exc.code} {body}") from exc
     except URLError as exc:
         raise RuntimeError(f"3X-UI API {path} failed: {exc}") from exc
+
+
+def validate_port(value, label):
+    try:
+        port = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be a number.") from exc
+    if port < 1 or port > 65535:
+        raise ValueError(f"{label} must be between 1 and 65535.")
+    return port
+
+
+def validate_text(value, label, default=""):
+    value = str(value if value is not None else default).strip()
+    if not value:
+        raise ValueError(f"{label} is required.")
+    if "\n" in value or "\r" in value:
+        raise ValueError(f"{label} cannot contain newlines.")
+    return value
+
+
+def validate_network(value):
+    value = str(value or "tcp").strip().lower()
+    if value not in ("tcp", "udp", "tcp,udp"):
+        raise ValueError("network must be tcp, udp, or tcp,udp.")
+    return value
+
+
+def truthy_value(value):
+    return str(value).strip().lower() in ("1", "true", "yes", "y", "on")
+
+
+def forward_payload(raw):
+    listen_port = validate_port(raw.get("listenPort") or raw.get("port"), "listenPort")
+    target_address = validate_text(raw.get("targetAddress") or raw.get("targetHost"), "targetAddress")
+    target_port = validate_port(raw.get("targetPort"), "targetPort")
+    network = validate_network(raw.get("network"))
+    listen = validate_text(raw.get("listen"), "listen", "0.0.0.0")
+    remark = str(raw.get("remark") or f"auto-dokodemo-door-{listen_port}").strip()
+    if not remark:
+        remark = f"auto-dokodemo-door-{listen_port}"
+    tproxy = str(raw.get("tproxy") or "off").strip()
+    follow = truthy_value(raw.get("followRedirect", False))
+    payload = {
+        "enable": True,
+        "remark": remark,
+        "listen": listen,
+        "port": listen_port,
+        "shareAddr": "",
+        "shareAddrStrategy": "listen",
+        "protocol": "tunnel",
+        "expiryTime": 0,
+        "total": 0,
+        "trafficReset": "never",
+        "settings": {
+            "rewriteAddress": target_address,
+            "rewritePort": target_port,
+            "allowedNetwork": network,
+            "followRedirect": follow,
+            "portMap": {},
+        },
+        "streamSettings": {"security": "none"},
+        "sniffing": {"enabled": False},
+    }
+    if tproxy and tproxy != "off":
+        payload["streamSettings"]["sockopt"] = {"tproxy": tproxy}
+    return payload
+
+
+def inbound_to_forward(inbound):
+    if inbound.get("protocol") != "tunnel":
+        return None
+    settings = parse_settings(inbound.get("settings"))
+    stream_settings = parse_settings(inbound.get("streamSettings"))
+    target_address = settings.get("rewriteAddress") or settings.get("address") or ""
+    target_port = settings.get("rewritePort") or settings.get("port") or 0
+    network = settings.get("allowedNetwork") or "tcp"
+    return {
+        "id": inbound.get("id"),
+        "enable": inbound.get("enable", True),
+        "remark": inbound.get("remark", ""),
+        "listen": inbound.get("listen") or "",
+        "listenPort": inbound.get("port") or 0,
+        "targetAddress": target_address,
+        "targetPort": target_port,
+        "network": network,
+        "followRedirect": bool(settings.get("followRedirect", False)),
+        "tproxy": (stream_settings.get("sockopt") or {}).get("tproxy", "off"),
+    }
+
+
+def list_forwards():
+    data = xui_json("/panel/api/inbounds/list")
+    forwards = []
+    for inbound in data.get("obj", []) or []:
+        forward = inbound_to_forward(inbound)
+        if forward:
+            forwards.append(forward)
+    return forwards
+
+
+def save_forward(raw):
+    payload = forward_payload(raw)
+    inbounds = xui_json("/panel/api/inbounds/list").get("obj", []) or []
+    existing_id = None
+    for inbound in inbounds:
+        if inbound.get("protocol") == "tunnel" and int(inbound.get("port") or 0) == payload["port"]:
+            existing_id = inbound.get("id")
+            break
+    if existing_id:
+        payload["id"] = existing_id
+        data = xui_request_json(f"/panel/api/inbounds/update/{existing_id}", method="POST", data=payload)
+    else:
+        data = xui_request_json("/panel/api/inbounds/add", method="POST", data=payload)
+    if not data.get("success", False):
+        raise RuntimeError(data.get("msg") or "3X-UI did not accept the forward.")
+    route_warning = ""
+    try:
+        ensure_forward_direct_route(payload["port"], payload["settings"]["allowedNetwork"])
+    except Exception as exc:
+        route_warning = str(exc)
+    restart_xray_service()
+    forward = inbound_to_forward(payload) or {}
+    forward["id"] = existing_id
+    forward["routeWarning"] = route_warning
+    return forward
+
+
+def ensure_forward_direct_route(port, network):
+    tag = f"in-{port}-{network}"
+    data = xui_request_json("/panel/api/xray/", method="POST", form={})
+    obj = data.get("obj", {})
+    if isinstance(obj, str):
+        obj = json.loads(obj)
+    template = obj.get("xraySetting", {})
+    if isinstance(template, str):
+        template = json.loads(template)
+    routing = template.setdefault("routing", {})
+    rules = routing.get("rules") or []
+    filtered = []
+    for rule in rules:
+        inbound_tags = rule.get("inboundTag") or []
+        if isinstance(inbound_tags, str):
+            inbound_tags = [inbound_tags]
+        if tag in inbound_tags:
+            continue
+        filtered.append(rule)
+    routing["rules"] = [{"type": "field", "inboundTag": [tag], "outboundTag": "direct"}] + filtered
+    xui_request_json(
+        "/panel/api/xray/update",
+        method="POST",
+        form={
+            "xraySetting": json.dumps(template, ensure_ascii=False),
+            "outboundTestUrl": "https://www.google.com/generate_204",
+        },
+    )
+
+
+def restart_xray_service():
+    try:
+        xui_request_json("/panel/api/server/restartXrayService", method="POST", form={})
+    except Exception:
+        pass
 
 
 def fetch_xui_links():

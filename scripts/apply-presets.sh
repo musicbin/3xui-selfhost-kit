@@ -12,7 +12,7 @@ OVERRIDE_KEYS=(
   ENABLE_HYSTERIA ENABLE_TROJAN ENABLE_SHADOWSOCKS ALLOW_SELF_SIGNED_TLS
   HYSTERIA_PORT TROJAN_PORT SHADOWSOCKS_PORT TLS_CERT_FILE TLS_KEY_FILE TLS_SERVER_NAME
   ENABLE_DOKODEMO DOKODEMO_LISTEN DOKODEMO_PORT DOKODEMO_TARGET_ADDRESS DOKODEMO_TARGET_PORT
-  DOKODEMO_NETWORK DOKODEMO_FOLLOW_REDIRECT DOKODEMO_TPROXY
+  DOKODEMO_NETWORK DOKODEMO_FOLLOW_REDIRECT DOKODEMO_TPROXY DOKODEMO_FORWARDS RECREATE_DOKODEMO_INBOUND
   CHAIN_ENABLED CHAIN_MODE CHAIN_TYPE CHAIN_ADDRESS CHAIN_PORT CHAIN_USER CHAIN_PASS
   CHAIN_SERVER_NAME CHAIN_ALLOW_INSECURE
   PRESET_CLIENT_SUFFIX ALL_NODES_SUB_ID DEFAULT_SUB_ID XUI_BUILTIN_ALL_NODES RECREATE_MANAGED_INBOUNDS
@@ -751,33 +751,38 @@ write_shadowsocks_optional() {
   fi
 }
 
-write_dokodemo_optional() {
-  if [ "${ENABLE_DOKODEMO:-0}" != "1" ]; then
-    return 0
-  fi
-  [ -n "${DOKODEMO_PORT:-}" ] || { echo "ENABLE_DOKODEMO=1 but DOKODEMO_PORT is empty." >&2; return 1; }
-  [ -n "${DOKODEMO_TARGET_ADDRESS:-}" ] || { echo "ENABLE_DOKODEMO=1 but DOKODEMO_TARGET_ADDRESS is empty." >&2; return 1; }
-  [ -n "${DOKODEMO_TARGET_PORT:-}" ] || { echo "ENABLE_DOKODEMO=1 but DOKODEMO_TARGET_PORT is empty." >&2; return 1; }
+write_dokodemo_inbound() {
+  local listen="$1"
+  local port="$2"
+  local target_address="$3"
+  local target_port="$4"
+  local network="${5:-tcp}"
+  local follow="${6:-0}"
+  local tproxy="${7:-off}"
+  local remark file
 
-  local remark file listen network tproxy follow
-  remark="auto-dokodemo-door-${DOKODEMO_PORT}"
-  file="runtime/dokodemo-door.json"
-  listen="${DOKODEMO_LISTEN:-127.0.0.1}"
-  network="${DOKODEMO_NETWORK:-tcp}"
-  tproxy="${DOKODEMO_TPROXY:-off}"
-  follow="${DOKODEMO_FOLLOW_REDIRECT:-0}"
+  [ -n "$port" ] || { echo "Dokodemo listen port is empty." >&2; return 1; }
+  [ -n "$target_address" ] || { echo "Dokodemo target address is empty." >&2; return 1; }
+  [ -n "$target_port" ] || { echo "Dokodemo target port is empty." >&2; return 1; }
+
+  remark="auto-dokodemo-door-${port}"
+  file="runtime/dokodemo-door-${port}.json"
 
   case "$network" in
     tcp|udp|tcp,udp) ;;
     *) echo "DOKODEMO_NETWORK must be tcp, udp, or tcp,udp." >&2; return 1 ;;
   esac
+  case "$follow" in
+    y|Y|yes|YES|1|true|TRUE) follow=1 ;;
+    *) follow=0 ;;
+  esac
 
   jq -n \
     --arg remark "$remark" \
     --arg listen "$listen" \
-    --argjson port "$DOKODEMO_PORT" \
-    --arg targetAddress "$DOKODEMO_TARGET_ADDRESS" \
-    --argjson targetPort "$DOKODEMO_TARGET_PORT" \
+    --argjson port "$port" \
+    --arg targetAddress "$target_address" \
+    --argjson targetPort "$target_port" \
     --arg network "$network" \
     --arg follow "$follow" \
     --arg tproxy "$tproxy" \
@@ -807,21 +812,59 @@ write_dokodemo_optional() {
     }' > "$file"
 
   recreate_inbound_if_requested "$remark"
+  if [ "${RECREATE_DOKODEMO_INBOUND:-0}" = "1" ]; then
+    delete_inbound_by_remark "$remark"
+  fi
   if add_inbound_if_missing "$remark" "$file"; then
     {
       echo "dokodemo-door forwarder (3X-UI protocol: tunnel)"
-      echo "${listen}:${DOKODEMO_PORT} -> ${DOKODEMO_TARGET_ADDRESS}:${DOKODEMO_TARGET_PORT} (${network})"
+      echo "${listen}:${port} -> ${target_address}:${target_port} (${network})"
       echo
     } >> runtime/client-links.txt
   fi
 
-  ensure_dokodemo_direct_route "$network"
+  ensure_dokodemo_direct_route "$port" "$network"
+}
+
+write_dokodemo_optional() {
+  local entry port target_address target_port network listen follow tproxy
+
+  if [ -n "${DOKODEMO_FORWARDS:-}" ]; then
+    while IFS= read -r entry; do
+      entry="${entry#"${entry%%[![:space:]]*}"}"
+      entry="${entry%"${entry##*[![:space:]]}"}"
+      [ -n "$entry" ] || continue
+      IFS=',' read -r port target_address target_port network listen follow tproxy _extra <<< "$entry"
+      port="${port:-}"
+      target_address="${target_address:-}"
+      target_port="${target_port:-}"
+      network="${network:-tcp}"
+      listen="${listen:-0.0.0.0}"
+      follow="${follow:-0}"
+      tproxy="${tproxy:-off}"
+      write_dokodemo_inbound "$listen" "$port" "$target_address" "$target_port" "$network" "$follow" "$tproxy"
+    done < <(printf '%s' "$DOKODEMO_FORWARDS" | tr ';' '\n')
+    return 0
+  fi
+
+  if [ "${ENABLE_DOKODEMO:-0}" != "1" ]; then
+    return 0
+  fi
+  write_dokodemo_inbound \
+    "${DOKODEMO_LISTEN:-127.0.0.1}" \
+    "${DOKODEMO_PORT:-}" \
+    "${DOKODEMO_TARGET_ADDRESS:-}" \
+    "${DOKODEMO_TARGET_PORT:-}" \
+    "${DOKODEMO_NETWORK:-tcp}" \
+    "${DOKODEMO_FOLLOW_REDIRECT:-0}" \
+    "${DOKODEMO_TPROXY:-off}"
 }
 
 ensure_dokodemo_direct_route() {
-  local network="$1"
+  local port="$1"
+  local network="$2"
   local resp template new tmp_out tag
-  tag="in-${DOKODEMO_PORT}-${network}"
+  tag="in-${port}-${network}"
   resp="$(api_post_form "/panel/api/xray/")"
   template="$(printf '%s' "$resp" | jq -r '.obj' | jq '.xraySetting')"
   new="$(jq --arg tag "$tag" '

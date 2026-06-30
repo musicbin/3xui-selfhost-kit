@@ -400,6 +400,8 @@ main() {
   refresh_links_from_api
   echo "Subscription web UI:"
   echo "  $(public_origin_hint)/sub/"
+  echo "Forward web UI:"
+  echo "  $(public_origin_hint)/forward/"
   echo "Tokenized local node subscription:"
   echo "  $(public_origin_hint)/subscriptions/${SUBSCRIPTION_TOKEN}.txt"
   echo "Default conversion config:"

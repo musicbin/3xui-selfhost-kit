@@ -256,11 +256,13 @@ write_runtime_summary() {
 
 8) Subscription converter
   Web UI: $(web_origin)/sub/
+  Forward web UI: $(web_origin)/forward/
   Local node subscription: $(web_origin)/subscriptions/${SUBSCRIPTION_TOKEN:-token}.txt
   Base64 subscription: $(web_origin)/subscriptions/${SUBSCRIPTION_TOKEN:-token}.b64
   Clash 3.5.yaml subscription: $(web_origin)/subconfig-api/render/clash?token=${SUBSCRIPTION_TOKEN:-token}
   Default local conversion config: $(web_origin)/sub/config/3.5.yaml
   Rules editor token: ${SUB_CONFIG_ADMIN_TOKEN:-not generated yet}
+  Forward editor token: ${SUB_CONFIG_ADMIN_TOKEN:-not generated yet}
   Note: If HTTPS_SITE_ENABLE=0 and HTTPS_HTTP_MODE=reject, public /sub/ is intentionally blocked after certificate setup.
 
 9) 3X-UI built-in subscription
@@ -298,6 +300,7 @@ show_header() {
   echo "${green}16. 官方更新/系统更新后自检并恢复配置${plain}"
   echo "${green}17. 检查域名 A/AAAA、IPv4/IPv6、端口监听${plain}"
   echo "${green}18. 刷新全部入站订阅链接【使用 3.5.yaml 规则】${plain}"
+  echo "${green}19. 傻瓜式配置端口转发【外部端口 -> 目标IP:端口】${plain}"
   line
   echo "${green} 0. 退出脚本${plain}"
   warn_line
@@ -335,6 +338,7 @@ show_status() {
   echo "TLS证书: ${blue}${TLS_CERT_FILE:-未配置}${plain}"
   echo "HTTPS站点: ${blue}${HTTPS_SITE_ENABLE:-0}${plain}  HTTP模式: ${blue}${HTTPS_HTTP_MODE:-reject}${plain}"
   echo "订阅转换: ${blue}$(web_origin)/sub/ ${plain}"
+  echo "端口转发页面: ${blue}$(web_origin)/forward/ ${plain}"
   echo "规则配置: ${blue}$(web_origin)/sub/config/3.5.yaml${plain}"
   echo "规则编辑Token: ${blue}${SUB_CONFIG_ADMIN_TOKEN:-未生成}${plain}"
   echo "3X-UI内置订阅前缀: ${blue}$(web_origin)${XUI_BUILTIN_SUB_PATH:-/xui-sub/}${plain}  监听: ${cyan}${XUI_BUILTIN_SUB_LISTEN}:${XUI_BUILTIN_SUB_PORT}${plain}"
@@ -456,23 +460,7 @@ protocol_presets_menu() {
         CHAIN_ENABLED=1 CHAIN_TYPE="${ct:-socks}" CHAIN_ADDRESS="$ca" CHAIN_PORT="$cp" CHAIN_MODE="${cm:-manual}" ./scripts/apply-presets.sh
       fi
       ;;
-    6)
-      local dl dp da dt dn df
-      read -r -p "监听IP [127.0.0.1，公网转发填0.0.0.0]: " dl </dev/tty || dl=""
-      read -r -p "监听端口 [18080]: " dp </dev/tty || dp=""
-      read -r -p "目标地址 [127.0.0.1]: " da </dev/tty || da=""
-      read -r -p "目标端口 [80]: " dt </dev/tty || dt=""
-      read -r -p "网络 tcp/udp/tcp,udp [tcp]: " dn </dev/tty || dn=""
-      read -r -p "是否 followRedirect 透明转发？[y/N]: " df </dev/tty || df=""
-      ENABLE_DOKODEMO=1 \
-        DOKODEMO_LISTEN="${dl:-127.0.0.1}" \
-        DOKODEMO_PORT="${dp:-18080}" \
-        DOKODEMO_TARGET_ADDRESS="${da:-127.0.0.1}" \
-        DOKODEMO_TARGET_PORT="${dt:-80}" \
-        DOKODEMO_NETWORK="${dn:-tcp}" \
-        DOKODEMO_FOLLOW_REDIRECT="$([ "${df:-n}" = "y" ] && printf 1 || printf 0)" \
-        ./scripts/apply-presets.sh
-      ;;
+    6) ./scripts/manage.sh forward ;;
     7)
       PROTOCOL_GUARD_ACTION=disable ./scripts/protocol-guard.sh
       ;;
@@ -638,6 +626,8 @@ show_help() {
   ./scripts/manage.sh domain
   ./scripts/manage.sh subscription
   ./scripts/manage.sh xui-subscription
+  sudo x-ui forward
+  ./scripts/manage.sh forward 27677 127.0.0.1 9999 tcp 0.0.0.0
   ./scripts/manage.sh protocol-guard
 
 安全建议:
@@ -660,7 +650,7 @@ main_loop() {
   while true; do
     refresh_env
     show_menu
-    read -r -p "请输入选项 [0-18]: " choice </dev/tty || choice="0"
+    read -r -p "请输入选项 [0-19]: " choice </dev/tty || choice="0"
     case "$choice" in
       1) install_or_start; pause ;;
       2) uninstall_xui; pause ;;
@@ -680,6 +670,7 @@ main_loop() {
       16) ./scripts/reconcile.sh; pause ;;
       17) ./scripts/network-check.sh; pause ;;
       18) ./scripts/manage.sh refresh-links; show_links; pause ;;
+      19) ./scripts/manage.sh forward; pause ;;
       0) exit 0 ;;
       *) echo "${yellow}无效选项。${plain}"; pause ;;
     esac
@@ -694,6 +685,10 @@ fi
 if [ "${1:-}" = "--autostart" ]; then
   autostart_menu
   exit 0
+fi
+
+if [ "$#" -gt 0 ]; then
+  exec ./scripts/manage.sh "$@"
 fi
 
 main_loop

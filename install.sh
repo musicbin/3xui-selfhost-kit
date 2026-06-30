@@ -11,6 +11,8 @@ INSTALL_ENV_OVERRIDE_KEYS=(
   REALITY_PORT REALITY_TARGET REALITY_SERVER_NAMES REALITY_SPIDER_X
   TLS_SERVER_NAME TLS_CERT_FILE TLS_KEY_FILE
   TROJAN_PORT SHADOWSOCKS_PORT HYSTERIA_PORT
+  ENABLE_DOKODEMO DOKODEMO_LISTEN DOKODEMO_PORT DOKODEMO_TARGET_ADDRESS DOKODEMO_TARGET_PORT
+  DOKODEMO_NETWORK DOKODEMO_FOLLOW_REDIRECT DOKODEMO_TPROXY DOKODEMO_FORWARDS
   ENABLE_SUBCONVERTER SUBSCRIPTION_EXPAND_ALIASES
   XUI_BUILTIN_SUB_ENABLE XUI_BUILTIN_ALL_NODES XUI_BUILTIN_JSON_ENABLE XUI_BUILTIN_CLASH_ENABLE
 )
@@ -41,6 +43,9 @@ random_port() {
 set_env_var() {
   local key="$1"
   local value="$2"
+  if [ "$key" = "DOKODEMO_FORWARDS" ]; then
+    value="'$(printf '%s' "$value" | sed "s/'/'\\\\''/g")'"
+  fi
   local env_file="${3:-.env}"
   local tmp
   tmp="$(mktemp)"
@@ -170,6 +175,7 @@ download_project() {
     "scripts/menu.sh"
     "caddy/Caddyfile"
     "site/index.html"
+    "site/forward/index.html"
     "site/sub/config/3.5.yaml"
     "README.md"
     "SECURITY.md"
@@ -211,6 +217,24 @@ configure_firewall_ports() {
   fi
   if [ "${ENABLE_HYSTERIA:-0}" = "1" ]; then
     ports+=("${HYSTERIA_PORT:-8443}/udp")
+  fi
+  if [ -n "${DOKODEMO_FORWARDS:-}" ]; then
+    local entry port _target _target_port network listen
+    while IFS= read -r entry; do
+      [ -n "$entry" ] || continue
+      IFS=',' read -r port _target _target_port network listen _rest <<< "$entry"
+      listen="${listen:-0.0.0.0}"
+      network="${network:-tcp}"
+      if [ "$listen" = "127.0.0.1" ] || [ "$listen" = "localhost" ]; then
+        continue
+      fi
+      [ -n "$port" ] || continue
+      case "$network" in
+        tcp) ports+=("${port}/tcp") ;;
+        udp) ports+=("${port}/udp") ;;
+        *) ports+=("${port}/tcp" "${port}/udp") ;;
+      esac
+    done < <(printf '%s' "$DOKODEMO_FORWARDS" | tr ';' '\n')
   fi
   if [ "${ENABLE_DOKODEMO:-0}" = "1" ] && [ "${DOKODEMO_LISTEN:-127.0.0.1}" != "127.0.0.1" ] && [ "${DOKODEMO_LISTEN:-127.0.0.1}" != "localhost" ]; then
     case "${DOKODEMO_NETWORK:-tcp}" in
@@ -664,6 +688,7 @@ DOKODEMO_TARGET_PORT=${DOKODEMO_TARGET_PORT:-80}
 DOKODEMO_NETWORK=${DOKODEMO_NETWORK:-tcp}
 DOKODEMO_FOLLOW_REDIRECT=${DOKODEMO_FOLLOW_REDIRECT:-0}
 DOKODEMO_TPROXY=${DOKODEMO_TPROXY:-off}
+DOKODEMO_FORWARDS=
 SAFE_PROTOCOLS=${SAFE_PROTOCOLS:-vless,trojan,shadowsocks,wireguard,hysteria,tunnel}
 PROTOCOL_GUARD_ACTION=${PROTOCOL_GUARD_ACTION:-disable}
 ENABLE_PROTOCOL_GUARD=${ENABLE_PROTOCOL_GUARD:-1}
@@ -713,6 +738,7 @@ XUI_BUILTIN_CLASH_ENABLE=${XUI_BUILTIN_CLASH_ENABLE:-0}
 XUI_BUILTIN_CLASH_PATH=${XUI_BUILTIN_CLASH_PATH:-/xui-clash-$(random_hex 6)/}
 EOF
   chmod 600 .env
+  set_env_var DOKODEMO_FORWARDS "${DOKODEMO_FORWARDS:-}"
 }
 
 compose_up() {
@@ -885,6 +911,12 @@ write_install_summary() {
   Add a dokodemo-door forwarding inbound (3X-UI protocol name: tunnel):
     ENABLE_DOKODEMO=1 DOKODEMO_LISTEN=127.0.0.1 DOKODEMO_PORT=18080 DOKODEMO_TARGET_ADDRESS=127.0.0.1 DOKODEMO_TARGET_PORT=80 DOKODEMO_NETWORK=tcp ./scripts/apply-presets.sh
 
+  Add multiple port-forward nodes in one command:
+    DOKODEMO_FORWARDS='27677,api.example.com,9999,tcp,0.0.0.0;27678,127.0.0.1,8080,tcp,0.0.0.0' ./scripts/apply-presets.sh
+
+  Add or update a port forward from the command line:
+    ./scripts/manage.sh forward 27677 127.0.0.1 9999 tcp 0.0.0.0
+
 7) Manage
   cd ${INSTALL_DIR}
   x-ui
@@ -914,6 +946,8 @@ write_install_summary() {
 11) Subscription converter
   Web UI:
     $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s/sub/' "${SERVER_ADDR:-your-server}" || printf 'http://%s:%s/sub/' "${SERVER_ADDR:-your-server}" "${SITE_HTTP_PORT:-80}")
+  Forward web UI:
+    $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s/forward/' "${SERVER_ADDR:-your-server}" || printf 'http://%s:%s/forward/' "${SERVER_ADDR:-your-server}" "${SITE_HTTP_PORT:-80}")
   Local node subscription:
     $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s/subscriptions/%s.txt' "${SERVER_ADDR:-your-server}" "${SUBSCRIPTION_TOKEN:-token}" || printf 'http://%s:%s/subscriptions/%s.txt' "${SERVER_ADDR:-your-server}" "${SITE_HTTP_PORT:-80}" "${SUBSCRIPTION_TOKEN:-token}")
   Base64 subscription for subconverter:
@@ -925,6 +959,8 @@ write_install_summary() {
   Rules editor:
     $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s/sub/' "${SERVER_ADDR:-your-server}" || printf 'http://%s:%s/sub/' "${SERVER_ADDR:-your-server}" "${SITE_HTTP_PORT:-80}")
   Rules editor token:
+    ${SUB_CONFIG_ADMIN_TOKEN:-not generated yet}
+  Forward editor token:
     ${SUB_CONFIG_ADMIN_TOKEN:-not generated yet}
   Backend image:
     ${SUBCONVERTER_IMAGE:-tindy2013/subconverter:latest}

@@ -100,6 +100,13 @@ sudo 3xui-kit
 cd /opt/3xui-selfhost-kit
 sudo ./scripts/manage.sh status
 sudo ./scripts/manage.sh links
+sudo x-ui forward 27677 127.0.0.1 9999 tcp 0.0.0.0
+```
+
+如果想按提示一步步填，直接运行 `sudo x-ui`，选择：
+
+```text
+19. 傻瓜式配置端口转发
 ```
 
 ## 默认功能
@@ -112,6 +119,7 @@ sudo ./scripts/manage.sh links
 - `Shadowsocks 2022`
 - 80 端口普通伪装页面
 - 订阅转换 Web UI：`/sub/`
+- 端口转发 Web UI：`/forward/`，用当前服务器域名和端口访问其他域名/IP 的端口
 - 3X-UI 内置订阅服务的 HTTPS 反代 URI，避免面板导出 `http://:2096` 链接
 - 安全协议守护：默认禁用 `vmess/http/mixed/mtproto/tun` 入站，保留 `vless/trojan/shadowsocks/wireguard/hysteria/tunnel`
 - `dokodemo-door` 转发预设；在 3X-UI 官方面板中协议名显示为 `tunnel`
@@ -272,6 +280,24 @@ sudo CHAIN_ENABLED=1 CHAIN_MODE=all CHAIN_TYPE=trojan CHAIN_ADDRESS=upstream.exa
 
 添加 dokodemo-door 转发入站：
 
+Web 页面方式：
+
+```text
+https://你的域名/forward/
+```
+
+页面使用安装摘要里的 `Rules editor token` 作为管理 Token，可以创建多个节点：`当前服务器域名:外部端口 -> 目标域名:目标端口`。
+
+命令行方式：
+
+```bash
+sudo x-ui forward 27677 127.0.0.1 9999 tcp 0.0.0.0
+```
+
+参数顺序是：`监听端口 目标地址 目标端口 网络 监听IP`。如果只运行 `sudo x-ui forward`，脚本会在命令框里逐项询问。3X-UI 官方面板里这个协议显示为 `tunnel`，它对应 Xray 的 dokodemo-door 风格转发器。
+
+也可以直接用环境变量方式添加：
+
 ```bash
 sudo ENABLE_DOKODEMO=1 \
   DOKODEMO_LISTEN=127.0.0.1 \
@@ -283,6 +309,23 @@ sudo ENABLE_DOKODEMO=1 \
 ```
 
 说明：3X-UI 官方面板里这个协议显示为 `tunnel`，它对应 Xray 的 dokodemo-door 风格转发器。为了安全，默认监听 `127.0.0.1`；如果确实要公网转发，再把 `DOKODEMO_LISTEN` 改成 `0.0.0.0` 并确认 VPS 防火墙只开放必要端口。
+
+一键安装/覆盖安装时也可以直接带上转发参数，已有 `.env` 时这些 `DOKODEMO_*` 参数会被写回：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh \
+  | sudo env CONFIG_WIZARD=0 ENABLE_DOKODEMO=1 DOKODEMO_LISTEN=0.0.0.0 DOKODEMO_PORT=27677 DOKODEMO_TARGET_ADDRESS=127.0.0.1 DOKODEMO_TARGET_PORT=9999 DOKODEMO_NETWORK=tcp MENU_AFTER_INSTALL=1 bash
+```
+
+如果要一键生成多个转发节点，使用 `DOKODEMO_FORWARDS`，每个节点格式是 `外部端口,目标域名或IP,目标端口,协议,监听IP`，多个节点用英文分号分隔：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh \
+  | sudo env CONFIG_WIZARD=0 \
+      'DOKODEMO_FORWARDS=27677,api.example.com,9999,tcp,0.0.0.0;27678,pay.example.net,443,tcp,0.0.0.0' \
+      MENU_AFTER_INSTALL=1 \
+      bash
+```
 
 禁用不安全入站协议：
 
