@@ -1038,6 +1038,13 @@ sync_all_subscription_id
 
 write_panel_links
 chmod 600 runtime/panel-all-links.txt 2>/dev/null || true
+if [ ! -s runtime/client-links.txt ] && [ -s runtime/panel-all-links.txt ]; then
+  {
+    echo "Panel-rendered all-nodes links"
+    awk '/^(vless|vmess|trojan|ss|hysteria2):\/\// { print }' runtime/panel-all-links.txt
+    echo
+  } > runtime/client-links.txt
+fi
 
 api_post_form "/panel/api/server/restartXrayService" | jq . || true
 chmod 600 runtime/client-links.txt
