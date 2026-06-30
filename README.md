@@ -288,6 +288,13 @@ https://你的域名/forward/
 
 页面使用安装摘要里的 `Rules editor token` 作为管理 Token，可以创建多个节点：`当前服务器域名:外部端口 -> 目标域名:目标端口`。
 
+如果忘记 Token，可以在服务器上查看：
+
+```bash
+cd /opt/3xui-selfhost-kit
+sudo awk -F= '/^SUB_CONFIG_ADMIN_TOKEN=/{print $2}' .env
+```
+
 命令行方式：
 
 ```bash
