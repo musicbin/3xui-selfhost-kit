@@ -234,7 +234,7 @@ write_web_ui() {
     <label>转换链接</label>
     <code id="result"></code>
     <label>全部入站订阅</label>
-    <code id="allLinksStatus">使用规则编辑 Token 可从 3X-UI 刷新全部入站链接，并自动扩展到 SERVER_ALIASES 中的多个域名/前缀。</code>
+    <code id="allLinksStatus">使用规则编辑 Token 可从 3X-UI 刷新 all-nodes 客户端；域名节点模式会按 SERVER_ALIASES 一对一生成多个域名节点。</code>
     <section class="editor">
       <h1>3.5.yaml 规则</h1>
       <p>转换链接默认使用这份规则配置。保存时请保留节点名称，分流组会按这些名称匹配。</p>
@@ -364,11 +364,32 @@ start_subscription_services() {
   fi
 }
 
+refresh_links_from_api() {
+  [ "${ENABLE_SUB_CONFIG_EDITOR:-1}" = "1" ] || return 0
+  [ -n "${SUB_CONFIG_ADMIN_TOKEN:-}" ] || return 0
+  command -v curl >/dev/null 2>&1 || return 0
+
+  local i response
+  for i in $(seq 1 20); do
+    response="$(curl -fsS --connect-timeout 2 --max-time 10 \
+      -X POST \
+      -H "X-Admin-Token: ${SUB_CONFIG_ADMIN_TOKEN}" \
+      "http://127.0.0.1:${SUB_CONFIG_PORT:-27880}/refresh-links" 2>/dev/null || true)"
+    if printf '%s' "$response" | grep -Eq '"success"[[:space:]]*:[[:space:]]*true'; then
+      echo "Subscription links refreshed from 3X-UI all-nodes clients."
+      return 0
+    fi
+    sleep 1
+  done
+  echo "Subscription API refresh did not complete yet; use the Web UI refresh button or run manage.sh refresh-links later." >&2
+}
+
 main() {
   ensure_xui_api_env
   write_subscription_files
   write_web_ui
   start_subscription_services
+  refresh_links_from_api
   echo "Subscription web UI:"
   echo "  $(public_origin_hint)/sub/"
   echo "Tokenized local node subscription:"

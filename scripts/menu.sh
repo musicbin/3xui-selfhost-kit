@@ -266,7 +266,7 @@ write_runtime_summary() {
 9) 3X-UI built-in subscription
   Listen: ${XUI_BUILTIN_SUB_LISTEN:-127.0.0.1}:${XUI_BUILTIN_SUB_PORT:-2096}
   Subscription prefix: $(web_origin)${XUI_BUILTIN_SUB_PATH:-/xui-sub/}
-  Actual links require a subId. With XUI_BUILTIN_ALL_NODES=1, every client is synced to ALL_NODES_SUB_ID and the generated all-nodes link contains all current nodes:
+  Actual links require a subId. With DOMAIN_NODE_MODE=1, generated domain-node clients are synced to ALL_NODES_SUB_ID so the default all-nodes link follows DOMAIN_NAMES:
     ${ROOT_DIR}/runtime/xui-builtin-sub-links.txt
   JSON URI: $(web_origin)${XUI_BUILTIN_JSON_PATH:-/xui-json/}
   Clash URI: $(web_origin)${XUI_BUILTIN_CLASH_PATH:-/xui-clash/}
@@ -338,7 +338,7 @@ show_status() {
   echo "规则配置: ${blue}$(web_origin)/sub/config/3.5.yaml${plain}"
   echo "规则编辑Token: ${blue}${SUB_CONFIG_ADMIN_TOKEN:-未生成}${plain}"
   echo "3X-UI内置订阅前缀: ${blue}$(web_origin)${XUI_BUILTIN_SUB_PATH:-/xui-sub/}${plain}  监听: ${cyan}${XUI_BUILTIN_SUB_LISTEN}:${XUI_BUILTIN_SUB_PORT}${plain}"
-  echo "说明: ${yellow}内置订阅必须追加 subId；XUI_BUILTIN_ALL_NODES=1 时所有客户端共享 ALL_NODES_SUB_ID，all-nodes 链接包含全部当前节点。直接打开前缀会跳转到 /sub/。${plain}"
+  echo "说明: ${yellow}内置订阅必须追加 subId；DOMAIN_NODE_MODE=1 时默认域名节点共享 ALL_NODES_SUB_ID，all-nodes 链接按 DOMAIN_NAMES 生成节点。直接打开前缀会跳转到 /sub/。${plain}"
   if [ -s runtime/xui-builtin-sub-links.txt ]; then
     echo "3X-UI内置订阅客户端链接:"
     sed 's/^/  /' runtime/xui-builtin-sub-links.txt | head -30
@@ -614,12 +614,12 @@ subscription_menu() {
     case "$yn" in n|N|no|NO|No) return 0 ;; esac
     set_env_var ENABLE_SUBCONVERTER "1"
   fi
-  ./scripts/subscription.sh
   if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
     ./scripts/xui-builtin-subscription.sh || true
   else
     echo "${yellow}HTTPS站点未启用，3X-UI内置订阅保持本机监听，不生成公网HTTP链接。${plain}"
   fi
+  ./scripts/subscription.sh
   refresh_env
   write_runtime_summary
 }
@@ -673,7 +673,7 @@ main_loop() {
       9) docker compose logs --tail=200 3xui; pause ;;
       10) domain_cert_menu; pause ;;
       11) ./scripts/mask-site.sh; docker compose --profile site up -d caddy-site; pause ;;
-      12) ./scripts/apply-presets.sh; ./scripts/subscription.sh; [ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && ./scripts/xui-builtin-subscription.sh || true; show_status; show_links; pause ;;
+      12) ./scripts/apply-presets.sh; [ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && ./scripts/xui-builtin-subscription.sh || true; ./scripts/subscription.sh; show_status; show_links; pause ;;
       13) autostart_menu; pause ;;
       14) show_help; pause ;;
       15) subscription_menu; pause ;;

@@ -21,6 +21,8 @@ XUI_API_BASE = os.environ.get("XUI_API_BASE", "").rstrip("/")
 XUI_API_TOKEN = os.environ.get("XUI_API_TOKEN", "")
 SERVER_ALIASES = os.environ.get("SERVER_ALIASES", "")
 EXPAND_ALIASES = os.environ.get("SUBSCRIPTION_EXPAND_ALIASES", "1") == "1"
+ALL_NODES_SUB_ID = os.environ.get("ALL_NODES_SUB_ID", "")
+DOMAIN_NODE_MODE = os.environ.get("DOMAIN_NODE_MODE", "1") in ("1", "true", "TRUE", "yes", "YES", "on", "ON")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -220,6 +222,14 @@ def xui_json(path):
 
 def fetch_xui_links():
     links = []
+    if ALL_NODES_SUB_ID:
+        try:
+            links = fetch_xui_links_for_sub_id(ALL_NODES_SUB_ID)
+        except Exception:
+            links = []
+        if links:
+            return unique_links(links)
+
     try:
         data = xui_json("/panel/api/inbounds/allLinks")
         if data.get("success") and isinstance(data.get("obj"), list):
@@ -234,6 +244,38 @@ def fetch_xui_links():
     for inbound in inbounds.get("obj", []) or []:
         settings = inbound.get("settings") or {}
         for client in settings.get("clients") or []:
+            email = client.get("email")
+            if email and email not in emails:
+                emails.append(email)
+    for email in emails:
+        data = xui_json("/panel/api/clients/links/" + quote(email, safe=""))
+        if data.get("success") and isinstance(data.get("obj"), list):
+            links.extend(str(v) for v in data["obj"] if isinstance(v, str))
+    return unique_links(links)
+
+
+def parse_settings(value):
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+    if isinstance(value, dict):
+        return value
+    return {}
+
+
+def fetch_xui_links_for_sub_id(sub_id):
+    links = []
+    inbounds = xui_json("/panel/api/inbounds/list")
+    emails = []
+    for inbound in inbounds.get("obj", []) or []:
+        settings = parse_settings(inbound.get("settings"))
+        for client in settings.get("clients") or []:
+            if not isinstance(client, dict):
+                continue
+            if client.get("subId") != sub_id:
+                continue
             email = client.get("email")
             if email and email not in emails:
                 emails.append(email)
@@ -325,6 +367,13 @@ def expand_links_for_aliases(links):
     return unique_links(expanded)
 
 
+def align_links_to_aliases(links):
+    host_aliases = aliases()
+    if not DOMAIN_NODE_MODE or not host_aliases or len(links) != len(host_aliases):
+        return None
+    return unique_links(replace_link_host(link, host_aliases[idx]) for idx, link in enumerate(links))
+
+
 def write_subscription_links(links):
     SUBSCRIPTION_DIR.mkdir(parents=True, exist_ok=True)
     text = "\n".join(links) + ("\n" if links else "")
@@ -336,7 +385,8 @@ def write_subscription_links(links):
 
 
 def refresh_subscription_links():
-    links = expand_links_for_aliases(fetch_xui_links())
+    links = fetch_xui_links()
+    links = align_links_to_aliases(links) or expand_links_for_aliases(links)
     write_subscription_links(links)
     return links
 

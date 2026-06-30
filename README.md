@@ -23,7 +23,7 @@ curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/ins
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh \
-  | sudo env CONFIG_WIZARD=0 'DOMAIN_NAMES=fsdfsfsdfxcvxvg.heubhkldhuu.shop,heubhkldhuu.shop,www.heubhkldhuu.shop,newctshpm.icu,safkdsajfkajfasfdyidsf.newctshpm.icu,www.newctshpm.icu' ENABLE_ACME=1 STRICT_DOMAIN_CERT=1 USE_DOMAIN_FOR_LINKS=1 HTTPS_SITE_ENABLE=1 HTTPS_HTTP_MODE=redirect AUTO_ENABLE_TROJAN=1 ENABLE_TROJAN=1 ENABLE_SUBCONVERTER=1 SUBSCRIPTION_EXPAND_ALIASES=1 XUI_BUILTIN_SUB_ENABLE=1 XUI_BUILTIN_ALL_NODES=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
+  | sudo env CONFIG_WIZARD=0 'DOMAIN_NAMES=fsdfsfsdfxcvxvg.heubhkldhuu.shop,heubhkldhuu.shop,www.heubhkldhuu.shop,newctshpm.icu,safkdsajfkajfasfdyidsf.newctshpm.icu,www.newctshpm.icu' DOMAIN_NODE_MODE=1 ENABLE_ACME=1 STRICT_DOMAIN_CERT=1 USE_DOMAIN_FOR_LINKS=1 HTTPS_SITE_ENABLE=1 HTTPS_HTTP_MODE=redirect AUTO_ENABLE_TROJAN=1 ENABLE_TROJAN=1 ENABLE_SUBCONVERTER=1 SUBSCRIPTION_EXPAND_ALIASES=1 XUI_BUILTIN_SUB_ENABLE=1 XUI_BUILTIN_ALL_NODES=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
 ```
 
 这条命令也可以用于覆盖安装：已有 `.env` 时不会重置面板账号、密码、数据库和证书，但会把命令里显式传入的域名、HTTPS、订阅参数写回 `.env`，然后重新申请/复用证书、刷新 Caddy、刷新 `/sub/` 和 3X-UI 内置 `all-nodes` 订阅。
@@ -35,6 +35,7 @@ curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/ins
   | sudo env \
       CONFIG_WIZARD=0 \
       'DOMAIN_NAMES=example.com,www.example.com,a.example.com,b.example.com' \
+      DOMAIN_NODE_MODE=1 \
       ENABLE_ACME=1 \
       STRICT_DOMAIN_CERT=1 \
       USE_DOMAIN_FOR_LINKS=1 \
@@ -53,7 +54,7 @@ curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/ins
 
 注意：`DOMAIN_NAMES=...` 必须作为一个完整参数传给 `env`。长域名列表请放在引号里，不要把逗号开头的下一段单独换到新行，否则 Shell 会把下一行当作命令执行。
 
-脚本会把这些域名写入 Caddy HTTPS 站点和 `SERVER_ALIASES`。申请证书前会先检查 DNS；开启 `STRICT_DOMAIN_CERT=1` 时，所有域名必须都签进同一张证书，否则安装直接失败，避免只配置好一部分域名。订阅 Web 刷新时会为每个域名/前缀生成对应的安全协议链接，不为每个域名重复占用端口，避免端口冲突。
+脚本会把这些域名写入 Caddy HTTPS 站点和 `SERVER_ALIASES`。申请证书前会先检查 DNS；开启 `STRICT_DOMAIN_CERT=1` 时，所有域名必须都签进同一张证书，否则安装直接失败，避免只配置好一部分域名。默认 `DOMAIN_NODE_MODE=1`，安装时传入几个域名，就会在默认 VLESS REALITY 入站里创建几个客户端节点，并把这些域名节点同步到 3X-UI 内置 all-nodes 订阅。
 
 如果某个前缀后续补好了 DNS，运行下面任一命令即可把它追加进证书：
 
@@ -227,7 +228,7 @@ https://your.domain/sub/config/3.5.yaml
 
 也就是你的订阅转换会继续按这份 `3.5.yaml` 的分流规则生成配置。
 
-最推荐给 Clash 使用的是这个渲染后的订阅链接，它会读取当前节点，再把节点参数填入 `3.5.yaml` 的 `proxies:`，并保留原来的节点名称和下面所有分流规则。3X-UI 官方面板只显示实际监听入站，不会为每个域名重复创建占用端口的入站；这里的渲染订阅会按 `DOMAIN_NAMES` / `SERVER_ALIASES` 展开每个域名的节点，如果节点数量超过模板里的默认名称，会自动追加 `@域名` 并同步写入自动选择、故障转移、负载均衡等分组：
+最推荐给 Clash 使用的是这个渲染后的订阅链接，它会读取当前 all-nodes 节点，再把节点参数填入 `3.5.yaml` 的 `proxies:`，并保留原来的节点名称和下面所有分流规则。默认 `DOMAIN_NODE_MODE=1` 时，安装传入几个域名就创建几个 VLESS REALITY 客户端节点；如果节点数量超过模板里的默认名称，会自动追加 `@域名` 并同步写入自动选择、故障转移、负载均衡等分组：
 
 ```text
 https://your.domain/subconfig-api/render/clash?token=<token>
@@ -328,7 +329,7 @@ Web 入口：
 https://your.domain/sub/
 ```
 
-在页面输入“规则编辑 Token”，点击“刷新全部入站链接”，会从 3X-UI 读取所有可订阅入站，并使用 `SERVER_ALIASES` 为多个域名/前缀生成链接。`dokodemo-door/tunnel` 是转发入站，没有客户端订阅 URL。
+在页面输入“规则编辑 Token”，点击“刷新全部入站链接”，会从 3X-UI 读取 all-nodes 订阅客户端。默认 `DOMAIN_NODE_MODE=1` 时，会把这些客户端按 `SERVER_ALIASES` 一对一映射成多个域名节点。`dokodemo-door/tunnel` 是转发入站，没有客户端订阅 URL。
 
 命令行刷新：
 
@@ -341,7 +342,7 @@ sudo ./scripts/manage.sh refresh-links
 
 3X-UI 官方内置订阅的有效格式是“随机前缀 + subId”。例如 `/xui-sub-xxxx/<subId>` 才是可用订阅；只打开 `/xui-sub-xxxx/` 没有客户端上下文，官方服务会返回 404。
 
-本项目会把基础路径自动跳转到 `/sub/`。默认 `XUI_BUILTIN_ALL_NODES=1`，会把所有 3X-UI 客户端同步到同一个 `ALL_NODES_SUB_ID`，因此 `runtime/xui-builtin-sub-links.txt` 里的 `all-nodes` 链接会包含默认节点、后续手动新增节点、以及重新建立后的节点。新增节点后运行 `sudo ./scripts/manage.sh refresh-links` 即可刷新 `/sub/` 和 3X-UI 内置全量订阅。
+本项目会把基础路径自动跳转到 `/sub/`。默认 `XUI_BUILTIN_ALL_NODES=1` 且 `DOMAIN_NODE_MODE=1` 时，会把自动生成的 `domain-node:*` 客户端同步到同一个 `ALL_NODES_SUB_ID`，因此 `runtime/xui-builtin-sub-links.txt` 里的 `all-nodes` 链接会按安装时传入的域名数量生成节点。新增或重建默认域名节点后运行 `sudo ./scripts/manage.sh refresh-links` 即可刷新 `/sub/` 和 3X-UI 内置全量订阅。
 
 ## 常用命令
 

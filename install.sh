@@ -5,7 +5,7 @@ REPO_RAW_BASE="${REPO_RAW_BASE:-https://raw.githubusercontent.com/musicbin/3xui-
 INSTALL_DIR="${INSTALL_DIR:-/opt/3xui-selfhost-kit}"
 
 INSTALL_ENV_OVERRIDE_KEYS=(
-  DOMAIN_NAMES SERVER_ALIASES SERVER_ADDR
+  DOMAIN_NAMES SERVER_ALIASES SERVER_ADDR DOMAIN_NODE_MODE
   ENABLE_ACME ACME_EMAIL STRICT_DOMAIN_CERT USE_DOMAIN_FOR_LINKS HTTPS_SITE_ENABLE HTTPS_HTTP_MODE SITE_HTTPS_PORT AUTO_ENABLE_TROJAN
   ENABLE_TROJAN ENABLE_SHADOWSOCKS ENABLE_HYSTERIA
   REALITY_PORT REALITY_TARGET REALITY_SERVER_NAMES REALITY_SPIDER_X
@@ -524,6 +524,7 @@ apply_existing_env_overrides() {
       has_install_override ENABLE_TROJAN || set_env_var ENABLE_TROJAN "1"
       has_install_override ENABLE_SUBCONVERTER || set_env_var ENABLE_SUBCONVERTER "1"
       has_install_override SUBSCRIPTION_EXPAND_ALIASES || set_env_var SUBSCRIPTION_EXPAND_ALIASES "1"
+      has_install_override DOMAIN_NODE_MODE || set_env_var DOMAIN_NODE_MODE "1"
       has_install_override XUI_BUILTIN_SUB_ENABLE || set_env_var XUI_BUILTIN_SUB_ENABLE "1"
       has_install_override XUI_BUILTIN_ALL_NODES || set_env_var XUI_BUILTIN_ALL_NODES "1"
       log "Domain one-click mode enabled for existing install: ${domains}"
@@ -532,6 +533,7 @@ apply_existing_env_overrides() {
 
   ensure_env_var ENABLE_SUBCONVERTER "1"
   ensure_env_var SUBSCRIPTION_EXPAND_ALIASES "1"
+  ensure_env_var DOMAIN_NODE_MODE "1"
   ensure_env_var XUI_BUILTIN_SUB_ENABLE "1"
   ensure_env_var XUI_BUILTIN_ALL_NODES "1"
 
@@ -697,6 +699,7 @@ SUB_CONFIG_PORT=${SUB_CONFIG_PORT:-27880}
 SUB_CONFIG_ADMIN_TOKEN=${SUB_CONFIG_ADMIN_TOKEN:-}
 SERVER_ALIASES=${SERVER_ALIASES:-${DOMAIN_NAMES:-${SERVER_ADDR:-${server_addr_default}}}}
 SUBSCRIPTION_EXPAND_ALIASES=${SUBSCRIPTION_EXPAND_ALIASES:-1}
+DOMAIN_NODE_MODE=${DOMAIN_NODE_MODE:-1}
 XUI_API_BASE=${XUI_API_BASE:-http://127.0.0.1:${PANEL_PORT:-2053}/${base_path}}
 XUI_API_TOKEN=${XUI_API_TOKEN:-}
 XUI_BUILTIN_SUB_ENABLE=${XUI_BUILTIN_SUB_ENABLE:-1}
@@ -988,8 +991,8 @@ main() {
   fi
 
   configure_protocol_guard
-  configure_subscription
   configure_xui_builtin_subscription
+  configure_subscription
 
   write_install_summary
   print_install_summary

@@ -24,6 +24,8 @@ services:
       XUI_API_TOKEN: ${XUI_API_TOKEN:-}
       SERVER_ALIASES: ${SERVER_ALIASES:-}
       SUBSCRIPTION_EXPAND_ALIASES: ${SUBSCRIPTION_EXPAND_ALIASES:-1}
+      ALL_NODES_SUB_ID: ${ALL_NODES_SUB_ID:-}
+      DOMAIN_NODE_MODE: ${DOMAIN_NODE_MODE:-1}
     volumes:
       - ./scripts/subconfig-api.py:/app/subconfig-api.py:ro
       - ./site/sub/config:/config
