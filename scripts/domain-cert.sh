@@ -135,6 +135,9 @@ write_caddyfile() {
   local panel_path="${WEB_BASE_PATH:-panel}"
   local xui_sub_block
   panel_path="${panel_path#/}"
+  if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && [ -z "${TLS_CERT_FILE:-}" ]; then
+    adopt_existing_primary_cert "${TLS_SERVER_NAME:-${SERVER_ADDR:-}}" "${DOMAIN_NAMES:-}" || true
+  fi
   xui_sub_block="$(xui_builtin_sub_caddy_block)"
   if [ "${TLS_CERT_FILE:-}" != "" ] && [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
     cat > caddy/Caddyfile <<EOF
@@ -270,10 +273,16 @@ issue_cert() {
   if ! "$acme" --issue --webroot "$ROOT_DIR/site" "${domain_args[@]}" --keylength ec-256; then
     log "Certificate issue/renewal was skipped or failed; trying to install the existing certificate."
   fi
-  "$acme" --install-cert -d "$primary" --ecc \
+  if ! "$acme" --install-cert -d "$primary" --ecc \
     --fullchain-file "$ROOT_DIR/data/cert/domains/fullchain.pem" \
     --key-file "$ROOT_DIR/data/cert/domains/privkey.pem" \
-    --reloadcmd "cd $ROOT_DIR && docker restart $XUI_CONTAINER >/dev/null 2>&1 || true"
+    --reloadcmd "cd $ROOT_DIR && docker restart $XUI_CONTAINER >/dev/null 2>&1 || true"; then
+    log "Could not install certificate for ${primary}."
+    return 1
+  fi
+
+  [ -s "$ROOT_DIR/data/cert/domains/fullchain.pem" ] || { log "Installed certificate file is missing."; return 1; }
+  [ -s "$ROOT_DIR/data/cert/domains/privkey.pem" ] || { log "Installed private key file is missing."; return 1; }
 
   set_env_var TLS_CERT_FILE "/root/cert/domains/fullchain.pem"
   set_env_var TLS_KEY_FILE "/root/cert/domains/privkey.pem"
@@ -303,6 +312,19 @@ cert_covers_domains() {
   return 0
 }
 
+cert_covers_domain() {
+  local domain="$1"
+  local cert="$ROOT_DIR/data/cert/domains/fullchain.pem"
+  local sans
+
+  [ -n "$domain" ] || return 1
+  [ -s "$cert" ] || return 1
+  command -v openssl >/dev/null 2>&1 || return 1
+  sans="$(openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null || true)"
+  [ -n "$sans" ] || return 1
+  printf '%s\n' "$sans" | grep -F "DNS:${domain}" >/dev/null
+}
+
 use_existing_cert() {
   local primary="$1"
   set_env_var TLS_CERT_FILE "/root/cert/domains/fullchain.pem"
@@ -313,6 +335,20 @@ use_existing_cert() {
   TLS_CERT_FILE="/root/cert/domains/fullchain.pem"
   TLS_KEY_FILE="/root/cert/domains/privkey.pem"
   TLS_SERVER_NAME="$primary"
+}
+
+adopt_existing_primary_cert() {
+  local primary="$1"
+  local domains="$2"
+
+  [ -s "$ROOT_DIR/data/cert/domains/fullchain.pem" ] || return 1
+  [ -s "$ROOT_DIR/data/cert/domains/privkey.pem" ] || return 1
+  cert_covers_domain "$primary" || return 1
+  use_existing_cert "$primary"
+  if ! cert_covers_domains "$domains"; then
+    log "Existing certificate covers primary ${primary}, but not every configured domain."
+    log "Panel and /sub/ on ${primary} can work now; fix DNS for the other domains, then rerun x-ui option 10 or 16."
+  fi
 }
 
 configure_firewall_ports() {
@@ -444,8 +480,12 @@ main() {
       log "Existing certificate already covers: ${domains}"
       use_existing_cert "$primary"
     else
-      issue_cert "$domains" "$primary"
+      issue_cert "$domains" "$primary" || adopt_existing_primary_cert "$primary" "$domains" || true
     fi
+  fi
+
+  if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && [ -z "${TLS_CERT_FILE:-}" ]; then
+    adopt_existing_primary_cert "$primary" "$domains" || true
   fi
 
   if [ "$AUTO_ENABLE_TROJAN" = "1" ]; then
