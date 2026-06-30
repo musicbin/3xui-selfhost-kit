@@ -346,6 +346,14 @@ cd /opt/3xui-selfhost-kit
 sudo ./scripts/manage.sh update
 ```
 
+如果已经打开了 `/forward/` 页面但保存显示 `Not found`，说明页面已更新、后台 `subconfig-api` 还在跑旧进程。执行下面命令补更新并重建接口服务：
+
+```bash
+cd /opt/3xui-selfhost-kit
+sudo ./scripts/manage.sh update
+sudo docker compose up -d --force-recreate subconfig-api
+```
+
 这会先备份本地数据库和 `.env`，然后在后台拉取最新官方 3x-ui 镜像，并自动运行：
 
 - 面板端口/路径/监听 IP 恢复

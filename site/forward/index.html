@@ -107,7 +107,7 @@
     <div class="grid">
       <div>
         <label for="listenPort">当前服务器端口</label>
-        <input id="listenPort" inputmode="numeric" placeholder="27677">
+        <input id="listenPort" type="number" inputmode="numeric" min="1" max="65535" placeholder="27677">
       </div>
       <div>
         <label for="targetAddress">目标域名或 IP</label>
@@ -115,7 +115,7 @@
       </div>
       <div>
         <label for="targetPort">目标端口</label>
-        <input id="targetPort" inputmode="numeric" placeholder="9999">
+        <input id="targetPort" type="number" inputmode="numeric" min="1" max="65535" placeholder="9999">
       </div>
     </div>
     <div class="grid two" style="margin-top:14px">
@@ -189,6 +189,17 @@
     previewEl.textContent = host + ":" + port;
   }
 
+  function validPort(value, label) {
+    if (!/^[0-9]+$/.test(value)) {
+      throw new Error(label + "必须填写数字端口。");
+    }
+    const port = Number(value);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new Error(label + "必须是 1-65535。");
+    }
+    return String(port);
+  }
+
   listenPortEl.addEventListener("input", preview);
   preview();
 
@@ -210,18 +221,20 @@
     try {
       statusEl.textContent = "正在保存...";
       localStorage.setItem("xuiForwardAdminToken", tokenEl.value.trim());
+      const listenPort = validPort(listenPortEl.value.trim(), "当前服务器端口");
+      const targetPort = validPort(targetPortEl.value.trim(), "目标端口");
       await api("/forwards", {
         method: "POST",
         body: JSON.stringify({
-          listenPort: listenPortEl.value.trim(),
+          listenPort,
           targetAddress: targetAddressEl.value.trim(),
-          targetPort: targetPortEl.value.trim(),
+          targetPort,
           network: networkEl.value,
           listen: listenEl.value,
           remark: remarkEl.value.trim()
         })
       });
-      statusEl.textContent = "已保存。请确认云安全组也放行了 " + listenPortEl.value.trim() + " 端口。";
+      statusEl.textContent = "已保存。请确认云安全组也放行了 " + listenPort + " 端口。";
       await loadForwards();
     } catch (error) {
       statusEl.textContent = "保存失败: " + error.message;

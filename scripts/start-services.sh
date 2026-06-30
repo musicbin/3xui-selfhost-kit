@@ -18,7 +18,7 @@ if [ "${ENABLE_SUBCONVERTER:-1}" = "1" ]; then
 fi
 
 if [ "${ENABLE_SUB_CONFIG_EDITOR:-1}" = "1" ]; then
-  docker compose up -d subconfig-api
+  docker compose up -d --force-recreate subconfig-api
 fi
 
 if [ "${ENABLE_MASK_SITE:-1}" = "1" ]; then
