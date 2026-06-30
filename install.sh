@@ -4,6 +4,23 @@ set -Eeuo pipefail
 REPO_RAW_BASE="${REPO_RAW_BASE:-https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/3xui-selfhost-kit}"
 
+INSTALL_ENV_OVERRIDE_KEYS=(
+  DOMAIN_NAMES SERVER_ALIASES SERVER_ADDR
+  ENABLE_ACME ACME_EMAIL STRICT_DOMAIN_CERT USE_DOMAIN_FOR_LINKS HTTPS_SITE_ENABLE HTTPS_HTTP_MODE SITE_HTTPS_PORT AUTO_ENABLE_TROJAN
+  ENABLE_TROJAN ENABLE_SHADOWSOCKS ENABLE_HYSTERIA
+  REALITY_PORT REALITY_TARGET REALITY_SERVER_NAMES REALITY_SPIDER_X
+  TLS_SERVER_NAME TLS_CERT_FILE TLS_KEY_FILE
+  TROJAN_PORT SHADOWSOCKS_PORT HYSTERIA_PORT
+  ENABLE_SUBCONVERTER SUBSCRIPTION_EXPAND_ALIASES
+  XUI_BUILTIN_SUB_ENABLE XUI_BUILTIN_ALL_NODES XUI_BUILTIN_JSON_ENABLE XUI_BUILTIN_CLASH_ENABLE
+)
+
+for key in "${INSTALL_ENV_OVERRIDE_KEYS[@]}"; do
+  if [ "${!key+x}" = "x" ]; then
+    printf -v "__install_override_${key}" '%s' "${!key}"
+  fi
+done
+
 log() { printf '[3xui-kit] %s\n' "$*"; }
 die() { printf '[3xui-kit] ERROR: %s\n' "$*" >&2; exit 1; }
 
@@ -19,6 +36,51 @@ random_port() {
   local hex
   hex="$(openssl rand -hex 2)"
   printf '%d' $((20000 + 0x${hex} % 30000))
+}
+
+set_env_var() {
+  local key="$1"
+  local value="$2"
+  local env_file="${3:-.env}"
+  local tmp
+  tmp="$(mktemp)"
+  awk -v k="$key" -v v="$value" '
+    BEGIN { done = 0 }
+    $0 ~ "^" k "=" { print k "=" v; done = 1; next }
+    { print }
+    END { if (!done) print k "=" v }
+  ' "$env_file" > "$tmp"
+  mv "$tmp" "$env_file"
+  chmod 600 "$env_file"
+}
+
+env_has_key() {
+  local key="$1"
+  local env_file="${2:-.env}"
+  grep -q "^${key}=" "$env_file" 2>/dev/null
+}
+
+ensure_env_var() {
+  local key="$1"
+  local value="$2"
+  local env_file="${3:-.env}"
+  env_has_key "$key" "$env_file" || set_env_var "$key" "$value" "$env_file"
+}
+
+has_install_override() {
+  local key="$1"
+  local override_name="__install_override_${key}"
+  [ "${!override_name+x}" = "x" ]
+}
+
+install_override_value() {
+  local key="$1"
+  local override_name="__install_override_${key}"
+  printf '%s' "${!override_name}"
+}
+
+first_domain() {
+  printf '%s' "$1" | awk -F'[,，;；[:space:]]+' '{print $1}'
 }
 
 need_root() {
@@ -205,6 +267,9 @@ configure_domains() {
   fi
   log "Configuring domain certificates: ${DOMAIN_NAMES}"
   if ! (cd "$INSTALL_DIR" && AUTO_ENABLE_TROJAN="${AUTO_ENABLE_TROJAN:-1}" ./scripts/domain-cert.sh --auto); then
+    if [ "${STRICT_DOMAIN_CERT:-0}" = "1" ]; then
+      die "Domain HTTPS setup failed in strict mode. Fix DNS/certificate coverage for every DOMAIN_NAMES entry, then rerun the one-click command."
+    fi
     log "Domain certificate automation did not fully complete. You can retry later with: x-ui -> domain/cert menu"
   fi
   load_env
@@ -428,26 +493,88 @@ run_config_wizard() {
   tty_print ""
 }
 
+apply_existing_env_overrides() {
+  cd "$INSTALL_DIR"
+  [ -f .env ] || return 0
+
+  local key value domains primary all_nodes_sub_id default_sub_id
+  for key in "${INSTALL_ENV_OVERRIDE_KEYS[@]}"; do
+    if has_install_override "$key"; then
+      value="$(install_override_value "$key")"
+      set_env_var "$key" "$value"
+      log "Applied install override to existing .env: ${key}"
+    fi
+  done
+
+  if has_install_override DOMAIN_NAMES; then
+    domains="$(install_override_value DOMAIN_NAMES)"
+    primary="$(first_domain "$domains")"
+    if [ -n "$domains" ]; then
+      has_install_override SERVER_ALIASES || set_env_var SERVER_ALIASES "$domains"
+      if [ -n "$primary" ]; then
+        has_install_override SERVER_ADDR || set_env_var SERVER_ADDR "$primary"
+        has_install_override TLS_SERVER_NAME || set_env_var TLS_SERVER_NAME "$primary"
+      fi
+      has_install_override ENABLE_ACME || set_env_var ENABLE_ACME "1"
+      has_install_override STRICT_DOMAIN_CERT || set_env_var STRICT_DOMAIN_CERT "1"
+      has_install_override USE_DOMAIN_FOR_LINKS || set_env_var USE_DOMAIN_FOR_LINKS "1"
+      has_install_override HTTPS_SITE_ENABLE || set_env_var HTTPS_SITE_ENABLE "1"
+      has_install_override HTTPS_HTTP_MODE || set_env_var HTTPS_HTTP_MODE "redirect"
+      has_install_override AUTO_ENABLE_TROJAN || set_env_var AUTO_ENABLE_TROJAN "1"
+      has_install_override ENABLE_TROJAN || set_env_var ENABLE_TROJAN "1"
+      has_install_override ENABLE_SUBCONVERTER || set_env_var ENABLE_SUBCONVERTER "1"
+      has_install_override SUBSCRIPTION_EXPAND_ALIASES || set_env_var SUBSCRIPTION_EXPAND_ALIASES "1"
+      has_install_override XUI_BUILTIN_SUB_ENABLE || set_env_var XUI_BUILTIN_SUB_ENABLE "1"
+      has_install_override XUI_BUILTIN_ALL_NODES || set_env_var XUI_BUILTIN_ALL_NODES "1"
+      log "Domain one-click mode enabled for existing install: ${domains}"
+    fi
+  fi
+
+  ensure_env_var ENABLE_SUBCONVERTER "1"
+  ensure_env_var SUBSCRIPTION_EXPAND_ALIASES "1"
+  ensure_env_var XUI_BUILTIN_SUB_ENABLE "1"
+  ensure_env_var XUI_BUILTIN_ALL_NODES "1"
+
+  all_nodes_sub_id="$(awk -F= '$1=="ALL_NODES_SUB_ID"{print $2; exit}' .env)"
+  default_sub_id="$(awk -F= '$1=="DEFAULT_SUB_ID"{print $2; exit}' .env)"
+  if [ -z "$all_nodes_sub_id" ]; then
+    all_nodes_sub_id="${default_sub_id:-$(random_hex 8)}"
+    set_env_var ALL_NODES_SUB_ID "$all_nodes_sub_id"
+  fi
+  if [ -z "$default_sub_id" ]; then
+    set_env_var DEFAULT_SUB_ID "$all_nodes_sub_id"
+  fi
+}
+
 write_env() {
   cd "$INSTALL_DIR"
   if [ -f .env ]; then
-    log "Keeping existing .env"
+    log "Keeping existing .env and applying explicit one-click overrides."
+    apply_existing_env_overrides
     return
   fi
 
-  local base_path default_addr first_configured_domain server_addr_default enable_acme_default https_site_default https_http_default
+  local base_path default_addr first_configured_domain server_addr_default enable_acme_default strict_domain_default use_domain_default https_site_default https_http_default all_nodes_sub_id default_sub_id
   base_path="${WEB_BASE_PATH:-p$(random_hex 9)}"
   base_path="${base_path#/}"
   default_addr="$(public_ip)"
-  first_configured_domain="$(printf '%s' "${DOMAIN_NAMES:-}" | awk -F'[,，;； ]+' '{print $1}')"
+  first_configured_domain="$(first_domain "${DOMAIN_NAMES:-}")"
   server_addr_default="$default_addr"
   enable_acme_default="${ENABLE_ACME:-0}"
+  strict_domain_default="${STRICT_DOMAIN_CERT:-0}"
+  use_domain_default="${USE_DOMAIN_FOR_LINKS:-1}"
   https_site_default="${HTTPS_SITE_ENABLE:-0}"
   https_http_default="${HTTPS_HTTP_MODE:-reject}"
   if [ -n "$first_configured_domain" ]; then
     server_addr_default="$first_configured_domain"
     if [ "${ENABLE_ACME+x}" != "x" ]; then
       enable_acme_default=1
+    fi
+    if [ "${STRICT_DOMAIN_CERT+x}" != "x" ]; then
+      strict_domain_default=1
+    fi
+    if [ "${USE_DOMAIN_FOR_LINKS+x}" != "x" ]; then
+      use_domain_default=1
     fi
     if [ "${HTTPS_SITE_ENABLE+x}" != "x" ]; then
       https_site_default=1
@@ -456,6 +583,8 @@ write_env() {
       https_http_default=redirect
     fi
   fi
+  all_nodes_sub_id="${ALL_NODES_SUB_ID:-${DEFAULT_SUB_ID:-$(random_hex 8)}}"
+  default_sub_id="${DEFAULT_SUB_ID:-$all_nodes_sub_id}"
 
   cat > .env <<EOF
 COMPOSE_PROJECT_NAME=3xui_selfhost
@@ -475,8 +604,8 @@ REALITY_SERVER_NAMES=${REALITY_SERVER_NAMES:-www.cloudflare.com,cloudflare.com}
 REALITY_SPIDER_X=${REALITY_SPIDER_X:-/}
 
 ENABLE_PRESETS=${ENABLE_PRESETS:-1}
-ALL_NODES_SUB_ID=${ALL_NODES_SUB_ID:-${DEFAULT_SUB_ID:-$(random_hex 8)}}
-DEFAULT_SUB_ID=${DEFAULT_SUB_ID:-${ALL_NODES_SUB_ID}}
+ALL_NODES_SUB_ID=${all_nodes_sub_id}
+DEFAULT_SUB_ID=${default_sub_id}
 ENABLE_HYSTERIA=${ENABLE_HYSTERIA:-0}
 ENABLE_TROJAN=${ENABLE_TROJAN:-0}
 ENABLE_SHADOWSOCKS=${ENABLE_SHADOWSOCKS:-1}
@@ -514,6 +643,8 @@ ENABLE_MASK_SITE=${ENABLE_MASK_SITE:-1}
 DOMAIN_NAMES=${DOMAIN_NAMES:-}
 ENABLE_ACME=${enable_acme_default}
 ACME_EMAIL=${ACME_EMAIL:-}
+STRICT_DOMAIN_CERT=${strict_domain_default}
+USE_DOMAIN_FOR_LINKS=${use_domain_default}
 AUTO_ENABLE_TROJAN=${AUTO_ENABLE_TROJAN:-1}
 HTTPS_SITE_ENABLE=${https_site_default}
 HTTPS_HTTP_MODE=${https_http_default}
@@ -604,11 +735,21 @@ write_install_summary() {
   local public_panel_url="http://${SERVER_ADDR:-your-server}:${PANEL_PORT:-2053}/${WEB_BASE_PATH:-panel}/"
   local tunnel_cmd="ssh -L ${PANEL_PORT:-2053}:127.0.0.1:${PANEL_PORT:-2053} root@${SERVER_ADDR:-your-server}"
   local tunnel_panel_url="http://127.0.0.1:${PANEL_PORT:-2053}/${WEB_BASE_PATH:-panel}/"
+  local panel_urls="${INSTALL_DIR}/runtime/panel-public-urls.txt"
   if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
     public_panel_url="https://${SERVER_ADDR:-your-server}/${WEB_BASE_PATH:-panel}/"
   fi
   mkdir -p "${INSTALL_DIR}/runtime"
   chmod 700 "${INSTALL_DIR}/runtime"
+  : > "$panel_urls"
+  if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && [ -n "${DOMAIN_NAMES:-}" ]; then
+    printf '%s' "$DOMAIN_NAMES" | tr ',，;； ' '\n' | awk 'NF && !seen[$0]++' | while IFS= read -r domain; do
+      printf 'https://%s/%s/\n' "$domain" "${WEB_BASE_PATH:-panel}" >> "$panel_urls"
+    done
+  else
+    printf '%s\n' "$public_panel_url" > "$panel_urls"
+  fi
+  chmod 600 "$panel_urls"
   cat > "$summary" <<EOF
 3x-ui self-host kit installed.
 
@@ -624,6 +765,8 @@ write_install_summary() {
 3) How to open the panel
   Panel public display URL:
     ${public_panel_url}
+  All configured domain panel URLs:
+    ${panel_urls}
 
   Recommended SSH tunnel when Panel bind is 127.0.0.1:
     ${tunnel_cmd}

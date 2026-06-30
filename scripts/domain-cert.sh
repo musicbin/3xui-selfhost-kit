@@ -17,6 +17,7 @@ SITE_HTTPS_PORT="${SITE_HTTPS_PORT:-443}"
 AUTO_ENABLE_TROJAN="${AUTO_ENABLE_TROJAN:-1}"
 HTTPS_SITE_ENABLE="${HTTPS_SITE_ENABLE:-0}"
 HTTPS_HTTP_MODE="${HTTPS_HTTP_MODE:-reject}"
+STRICT_DOMAIN_CERT="${STRICT_DOMAIN_CERT:-0}"
 
 green=$'\033[0;32m'
 cyan=$'\033[0;36m'
@@ -25,6 +26,13 @@ red=$'\033[0;31m'
 plain=$'\033[0m'
 
 log() { printf '[domain-cert] %s\n' "$*"; }
+
+truthy() {
+  case "${1:-}" in
+    1|true|TRUE|yes|YES|y|Y|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 random_port() {
   local hex
@@ -499,6 +507,12 @@ main() {
     cert_primary="$primary"
     log "No configured domain currently has DNS A/AAAA records. HTTPS certificate request will be skipped."
   fi
+  if truthy "$STRICT_DOMAIN_CERT" && [ "$cert_domains" != "$domains" ]; then
+    log "STRICT_DOMAIN_CERT=1 requires every configured domain to have DNS A/AAAA before HTTPS is enabled."
+    log "Configured domains: ${domains}"
+    log "DNS-ready domains: ${cert_domains:-none}"
+    return 1
+  fi
 
   set_env_var DOMAIN_NAMES "$domains"
   set_env_var SERVER_ALIASES "$domains"
@@ -528,12 +542,26 @@ main() {
       log "Existing certificate already covers: ${cert_domains}"
       use_existing_cert "$cert_primary"
     else
-      issue_cert "$cert_domains" "$cert_primary" || adopt_existing_primary_cert "$cert_primary" "$cert_domains" || true
+      if ! issue_cert "$cert_domains" "$cert_primary"; then
+        if ! adopt_existing_primary_cert "$cert_primary" "$cert_domains"; then
+          truthy "$STRICT_DOMAIN_CERT" && return 1
+        fi
+      fi
     fi
   fi
 
   if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && [ -z "${TLS_CERT_FILE:-}" ]; then
-    adopt_existing_primary_cert "$cert_primary" "${cert_domains:-$domains}" || true
+    if ! adopt_existing_primary_cert "$cert_primary" "${cert_domains:-$domains}"; then
+      truthy "$STRICT_DOMAIN_CERT" && return 1
+    fi
+  fi
+
+  if truthy "$STRICT_DOMAIN_CERT" && [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
+    if ! cert_covers_domains "$domains"; then
+      log "STRICT_DOMAIN_CERT=1 requires the installed certificate to cover every configured domain."
+      log "Fix DNS/proxy records for all domains, then rerun the one-click command."
+      return 1
+    fi
   fi
 
   if [ "$AUTO_ENABLE_TROJAN" = "1" ]; then

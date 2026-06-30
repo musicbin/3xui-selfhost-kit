@@ -23,8 +23,10 @@ curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/ins
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh \
-  | sudo env CONFIG_WIZARD=0 'DOMAIN_NAMES=heubhkldhuu.shop,www.heubhkldhuu.shop,newctshpm.icu,www.newctshpm.icu,safkdsajfkajfasfdyidsf.newctshpm.icu' MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
+  | sudo env CONFIG_WIZARD=0 'DOMAIN_NAMES=newctshpm.icu,heubhkldhuu.shop,www.heubhkldhuu.shop,www.newctshpm.icu,safkdsajfkajfasfdyidsf.newctshpm.icu,fsdfsfdsfxcvxvg.heubhkldhuu.shop' ENABLE_ACME=1 STRICT_DOMAIN_CERT=1 USE_DOMAIN_FOR_LINKS=1 HTTPS_SITE_ENABLE=1 HTTPS_HTTP_MODE=redirect AUTO_ENABLE_TROJAN=1 ENABLE_TROJAN=1 ENABLE_SUBCONVERTER=1 SUBSCRIPTION_EXPAND_ALIASES=1 XUI_BUILTIN_SUB_ENABLE=1 XUI_BUILTIN_ALL_NODES=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
 ```
+
+这条命令也可以用于覆盖安装：已有 `.env` 时不会重置面板账号、密码、数据库和证书，但会把命令里显式传入的域名、HTTPS、订阅参数写回 `.env`，然后重新申请/复用证书、刷新 Caddy、刷新 `/sub/` 和 3X-UI 内置 `all-nodes` 订阅。
 
 多个域名、多个前缀都写进 `DOMAIN_NAMES`，例如：
 
@@ -33,6 +35,17 @@ curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/ins
   | sudo env \
       CONFIG_WIZARD=0 \
       'DOMAIN_NAMES=example.com,www.example.com,a.example.com,b.example.com' \
+      ENABLE_ACME=1 \
+      STRICT_DOMAIN_CERT=1 \
+      USE_DOMAIN_FOR_LINKS=1 \
+      HTTPS_SITE_ENABLE=1 \
+      HTTPS_HTTP_MODE=redirect \
+      AUTO_ENABLE_TROJAN=1 \
+      ENABLE_TROJAN=1 \
+      ENABLE_SUBCONVERTER=1 \
+      SUBSCRIPTION_EXPAND_ALIASES=1 \
+      XUI_BUILTIN_SUB_ENABLE=1 \
+      XUI_BUILTIN_ALL_NODES=1 \
       MENU_AFTER_INSTALL=1 \
       ENABLE_SYSTEMD_AUTOSTART=1 \
       bash
