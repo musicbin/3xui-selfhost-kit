@@ -19,14 +19,23 @@ curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/ins
   | sudo env CONFIG_WIZARD=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
 ```
 
-如果 DNS 已经解析好，可以一条命令直接切到域名 + HTTPS 状态：
+完整一键安装，有域名并启用 HTTPS、订阅、端口转发 Web 页面：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh \
   | sudo env CONFIG_WIZARD=0 'DOMAIN_NAMES=fsdfsfsdfxcvxvg.heubhkldhuu.shop,heubhkldhuu.shop,www.heubhkldhuu.shop,newctshpm.icu,safkdsajfkajfasfdyidsf.newctshpm.icu,www.newctshpm.icu' DOMAIN_NODE_MODE=1 ENABLE_ACME=1 STRICT_DOMAIN_CERT=1 USE_DOMAIN_FOR_LINKS=1 HTTPS_SITE_ENABLE=1 HTTPS_HTTP_MODE=redirect AUTO_ENABLE_TROJAN=1 ENABLE_TROJAN=1 ENABLE_SUBCONVERTER=1 SUBSCRIPTION_EXPAND_ALIASES=1 XUI_BUILTIN_SUB_ENABLE=1 XUI_BUILTIN_ALL_NODES=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
 ```
 
-这条命令也可以用于覆盖安装：已有 `.env` 时不会重置面板账号、密码、数据库和证书，但会把命令里显式传入的域名、HTTPS、订阅参数写回 `.env`，然后重新申请/复用证书、刷新 Caddy、刷新 `/sub/` 和 3X-UI 内置 `all-nodes` 订阅。
+完整一键安装，没有域名时使用公网 IP + HTTP 入口：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh \
+  | sudo env CONFIG_WIZARD=0 DOMAIN_NAMES= SERVER_ALIASES= ENABLE_ACME=0 STRICT_DOMAIN_CERT=0 USE_DOMAIN_FOR_LINKS=0 TLS_SERVER_NAME= TLS_CERT_FILE= TLS_KEY_FILE= HTTPS_SITE_ENABLE=0 HTTPS_HTTP_MODE=allow AUTO_ENABLE_TROJAN=0 ENABLE_TROJAN=0 ENABLE_SUBCONVERTER=1 SUBSCRIPTION_EXPAND_ALIASES=1 DOMAIN_NODE_MODE=1 XUI_BUILTIN_SUB_ENABLE=1 XUI_BUILTIN_ALL_NODES=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
+```
+
+无域名模式会自动检测公网 IP 并写入 `SERVER_ADDR`。如果服务器检测到的 IP 不对，可以在命令中额外加上 `SERVER_ADDR=你的服务器公网IP`。
+
+上面两条完整命令都可以用于覆盖安装：已有 `.env` 时不会重置面板账号、密码和数据库，但会把命令里显式传入的域名、HTTPS、订阅参数写回 `.env`，然后按当前模式刷新 Caddy、刷新 `/sub/`、`/forward/` 和 3X-UI 内置 `all-nodes` 订阅。
 
 多个域名、多个前缀都写进 `DOMAIN_NAMES`，例如：
 
@@ -71,7 +80,7 @@ sudo x-ui
 - 将 HTTP 80 自动 308 跳转到 HTTPS
 - 将面板和 3X-UI 内置订阅服务改为本机监听，再由 Caddy 通过 HTTPS 随机路径反代
 
-安装时会进入交互向导。直接回车即可使用安全默认值；也可以输入一个或多个域名，例如：
+使用默认交互式安装时会进入配置向导。直接回车即可使用安全默认值；也可以输入一个或多个域名，例如：
 
 ```text
 heubhkldhuu.shop,www.heubhkldhuu.shop
@@ -106,7 +115,7 @@ sudo x-ui forward 27677 127.0.0.1 9999 tcp 0.0.0.0
 如果想按提示一步步填，直接运行 `sudo x-ui`，选择：
 
 ```text
-19. 傻瓜式配置端口转发
+19. 打开端口转发 Web 页面【自动填Token】
 ```
 
 ## 默认功能
