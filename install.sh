@@ -714,9 +714,34 @@ EOF
 
 compose_up() {
   cd "$INSTALL_DIR"
+  remove_orphan_compose_containers
   log "Pulling latest official 3x-ui image and starting service."
   docker compose pull 3xui
   docker compose up -d 3xui
+}
+
+remove_orphan_compose_containers() {
+  local expected_project="${COMPOSE_PROJECT_NAME:-3xui_selfhost}"
+  local entries=(
+    "${XUI_CONTAINER:-3xui}:3xui"
+    "${SUBCONVERTER_CONTAINER:-3xui_subconverter}:subconverter"
+    "${SUB_CONFIG_API_CONTAINER:-3xui_subconfig_api}:subconfig-api"
+    "${CADDY_CONTAINER:-3xui_site}:caddy-site"
+    "${CADDY_HTTPS_CONTAINER:-3xui_https_site}:caddy-https"
+  )
+  local entry name service project_label service_label
+  for entry in "${entries[@]}"; do
+    name="${entry%%:*}"
+    service="${entry#*:}"
+    docker inspect "$name" >/dev/null 2>&1 || continue
+    project_label="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$name" 2>/dev/null || true)"
+    service_label="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.service" }}' "$name" 2>/dev/null || true)"
+    if [ "$project_label" = "$expected_project" ] && [ "$service_label" = "$service" ]; then
+      continue
+    fi
+    log "Removing orphan/conflicting container ${name} before compose up."
+    docker rm -f "$name" >/dev/null 2>&1 || true
+  done
 }
 
 load_env() {
