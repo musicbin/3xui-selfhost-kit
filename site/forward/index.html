@@ -184,6 +184,22 @@
     };
   }
 
+  function applyTokenFromHash() {
+    const hash = location.hash.startsWith("#") ? location.hash.slice(1) : "";
+    if (!hash) return false;
+    const params = new URLSearchParams(hash);
+    const token = params.get("token") || params.get("adminToken");
+    if (!token) return false;
+    tokenEl.value = token;
+    localStorage.setItem("xuiForwardAdminToken", token);
+    params.delete("token");
+    params.delete("adminToken");
+    const suffix = params.toString() ? "#" + params.toString() : "";
+    history.replaceState(null, "", location.pathname + location.search + suffix);
+    statusEl.textContent = "已自动填入管理 Token。";
+    return true;
+  }
+
   function requireAdminToken() {
     const token = tokenEl.value.trim();
     if (!token) {
@@ -210,6 +226,9 @@
 
   listenPortEl.addEventListener("input", preview);
   preview();
+  if (applyTokenFromHash()) {
+    loadForwards();
+  }
 
   async function api(path, options = {}) {
     const response = await fetch(apiBase + path, {

@@ -25,6 +25,11 @@ if [ -f .env ]; then
 fi
 
 XUI_CONTAINER="${XUI_CONTAINER:-3xui}"
+SERVER_ADDR="${SERVER_ADDR:-your-server}"
+SITE_HTTP_PORT="${SITE_HTTP_PORT:-80}"
+SITE_HTTPS_PORT="${SITE_HTTPS_PORT:-443}"
+HTTPS_SITE_ENABLE="${HTTPS_SITE_ENABLE:-0}"
+SUB_CONFIG_ADMIN_TOKEN="${SUB_CONFIG_ADMIN_TOKEN:-}"
 
 usage() {
   cat <<'EOF'
@@ -50,12 +55,87 @@ Commands:
   network-check  Check A/AAAA records, IPv4/IPv6, and local listeners
   protocol-guard Disable or delete unsafe inbound protocols
   forward        Add/update a dokodemo-door/tunnel port forward
+  forward-web    Open the port-forward web UI with token auto-filled
 
 Forward examples:
   ./scripts/manage.sh forward
   ./scripts/manage.sh forward 27677 127.0.0.1 9999
   ./scripts/manage.sh forward 27677 127.0.0.1 9999 tcp 0.0.0.0
 EOF
+}
+
+set_env_var() {
+  local key="$1"
+  local value="$2"
+  local tmp
+  tmp="$(mktemp)"
+  if [ -f .env ]; then
+    awk -v k="$key" -v v="$value" '
+      BEGIN { done = 0 }
+      $0 ~ "^" k "=" { print k "=" v; done = 1; next }
+      { print }
+      END { if (!done) print k "=" v }
+    ' .env > "$tmp"
+  else
+    printf '%s=%s\n' "$key" "$value" > "$tmp"
+  fi
+  mv "$tmp" .env
+  chmod 600 .env
+}
+
+web_origin() {
+  if [ "$HTTPS_SITE_ENABLE" = "1" ]; then
+    if [ "$SITE_HTTPS_PORT" = "443" ]; then
+      printf 'https://%s' "$SERVER_ADDR"
+    else
+      printf 'https://%s:%s' "$SERVER_ADDR" "$SITE_HTTPS_PORT"
+    fi
+  else
+    if [ "$SITE_HTTP_PORT" = "80" ]; then
+      printf 'http://%s' "$SERVER_ADDR"
+    else
+      printf 'http://%s:%s' "$SERVER_ADDR" "$SITE_HTTP_PORT"
+    fi
+  fi
+}
+
+forward_web_url() {
+  local url
+  url="$(web_origin)/forward/"
+  if [ -n "$SUB_CONFIG_ADMIN_TOKEN" ]; then
+    url="${url}#token=${SUB_CONFIG_ADMIN_TOKEN}"
+  fi
+  printf '%s' "$url"
+}
+
+open_forward_web() {
+  local url opened=0
+  url="$(forward_web_url)"
+  echo
+  echo "Forward web UI:"
+  echo "  ${url}"
+  if [ -t 1 ]; then
+    printf '  clickable: \033]8;;%s\033\\%s\033]8;;\033\\\n' "$url" "$url"
+  fi
+
+  if [ "${AUTO_OPEN_BROWSER:-1}" = "0" ]; then
+    return 0
+  fi
+  if command -v open >/dev/null 2>&1; then
+    open "$url" >/dev/null 2>&1 && opened=1 || true
+  elif command -v wslview >/dev/null 2>&1; then
+    wslview "$url" >/dev/null 2>&1 && opened=1 || true
+  elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v xdg-open >/dev/null 2>&1; then
+    nohup xdg-open "$url" >/dev/null 2>&1 && opened=1 || true
+  elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v gio >/dev/null 2>&1; then
+    nohup gio open "$url" >/dev/null 2>&1 && opened=1 || true
+  fi
+
+  if [ "$opened" = "1" ]; then
+    echo "Browser open requested. If it did not appear, copy the link above."
+  else
+    echo "This terminal cannot directly pop up a browser. Click or copy the link above."
+  fi
 }
 
 validate_port() {
@@ -191,6 +271,9 @@ configure_forward() {
   open_forward_firewall "$listen_addr" "$listen_port" "$network"
   echo "Forward ready: ${listen_addr}:${listen_port} -> ${target_addr}:${target_port} (${network})"
   echo "3X-UI panel protocol name: tunnel"
+  if [ "$interactive" = "1" ]; then
+    open_forward_web
+  fi
 }
 
 cmd="${1:-}"
@@ -295,6 +378,9 @@ case "$cmd" in
   forward|port-forward|dokodemo|tunnel)
     shift
     configure_forward "$@"
+    ;;
+  forward-web)
+    open_forward_web
     ;;
   network-check)
     ./scripts/network-check.sh

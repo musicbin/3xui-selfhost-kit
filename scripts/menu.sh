@@ -178,6 +178,15 @@ web_origin() {
   fi
 }
 
+forward_web_url() {
+  local url
+  url="$(web_origin)/forward/"
+  if [ -n "${SUB_CONFIG_ADMIN_TOKEN:-}" ]; then
+    url="${url}#token=${SUB_CONFIG_ADMIN_TOKEN}"
+  fi
+  printf '%s' "$url"
+}
+
 refresh_env() {
   if [ -f .env ]; then
     set -a
@@ -300,7 +309,7 @@ show_header() {
   echo "${green}16. 官方更新/系统更新后自检并恢复配置${plain}"
   echo "${green}17. 检查域名 A/AAAA、IPv4/IPv6、端口监听${plain}"
   echo "${green}18. 刷新全部入站订阅链接【使用 3.5.yaml 规则】${plain}"
-  echo "${green}19. 傻瓜式配置端口转发【外部端口 -> 目标IP:端口】${plain}"
+  echo "${green}19. 打开端口转发 Web 页面【自动填Token】${plain}"
   line
   echo "${green} 0. 退出脚本${plain}"
   warn_line
@@ -339,6 +348,7 @@ show_status() {
   echo "HTTPS站点: ${blue}${HTTPS_SITE_ENABLE:-0}${plain}  HTTP模式: ${blue}${HTTPS_HTTP_MODE:-reject}${plain}"
   echo "订阅转换: ${blue}$(web_origin)/sub/ ${plain}"
   echo "端口转发页面: ${blue}$(web_origin)/forward/ ${plain}"
+  echo "端口转发自动填Token: ${blue}$(forward_web_url)${plain}"
   echo "规则配置: ${blue}$(web_origin)/sub/config/3.5.yaml${plain}"
   echo "规则编辑Token: ${blue}${SUB_CONFIG_ADMIN_TOKEN:-未生成}${plain}"
   echo "3X-UI内置订阅前缀: ${blue}$(web_origin)${XUI_BUILTIN_SUB_PATH:-/xui-sub/}${plain}  监听: ${cyan}${XUI_BUILTIN_SUB_LISTEN}:${XUI_BUILTIN_SUB_PORT}${plain}"
@@ -670,7 +680,7 @@ main_loop() {
       16) ./scripts/reconcile.sh; pause ;;
       17) ./scripts/network-check.sh; pause ;;
       18) ./scripts/manage.sh refresh-links; show_links; pause ;;
-      19) ./scripts/manage.sh forward; pause ;;
+      19) ./scripts/manage.sh forward-web; pause ;;
       0) exit 0 ;;
       *) echo "${yellow}无效选项。${plain}"; pause ;;
     esac

@@ -288,6 +288,8 @@ https://你的域名/forward/
 
 页面使用安装摘要里的 `Rules editor token` 作为管理 Token，可以创建多个节点：`当前服务器域名:外部端口 -> 目标域名:目标端口`。
 
+命令行菜单里选择“打开端口转发 Web 页面【自动填Token】”后，会自动给出并尝试打开带 Token 的 `/forward/#token=...` 链接。页面读取 Token 后会写入当前浏览器，并立即清理地址栏里的 Token。
+
 如果忘记 Token，可以在服务器上查看：
 
 ```bash

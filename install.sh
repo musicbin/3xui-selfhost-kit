@@ -948,6 +948,8 @@ write_install_summary() {
     $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s/sub/' "${SERVER_ADDR:-your-server}" || printf 'http://%s:%s/sub/' "${SERVER_ADDR:-your-server}" "${SITE_HTTP_PORT:-80}")
   Forward web UI:
     $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s/forward/' "${SERVER_ADDR:-your-server}" || printf 'http://%s:%s/forward/' "${SERVER_ADDR:-your-server}" "${SITE_HTTP_PORT:-80}")
+  Forward web UI with token auto-filled:
+    $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s/forward/#token=%s' "${SERVER_ADDR:-your-server}" "${SUB_CONFIG_ADMIN_TOKEN:-token}" || printf 'http://%s:%s/forward/#token=%s' "${SERVER_ADDR:-your-server}" "${SITE_HTTP_PORT:-80}" "${SUB_CONFIG_ADMIN_TOKEN:-token}")
   Local node subscription:
     $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s/subscriptions/%s.txt' "${SERVER_ADDR:-your-server}" "${SUBSCRIPTION_TOKEN:-token}" || printf 'http://%s:%s/subscriptions/%s.txt' "${SERVER_ADDR:-your-server}" "${SITE_HTTP_PORT:-80}" "${SUBSCRIPTION_TOKEN:-token}")
   Base64 subscription for subconverter:
