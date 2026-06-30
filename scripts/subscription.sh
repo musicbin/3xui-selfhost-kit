@@ -376,6 +376,14 @@ refresh_links_from_api() {
       -H "X-Admin-Token: ${SUB_CONFIG_ADMIN_TOKEN}" \
       "http://127.0.0.1:${SUB_CONFIG_PORT:-27880}/refresh-links" 2>/dev/null || true)"
     if printf '%s' "$response" | grep -Eq '"success"[[:space:]]*:[[:space:]]*true'; then
+      if [ -s "site/subscriptions/${SUBSCRIPTION_TOKEN}.txt" ]; then
+        {
+          echo "Domain all-nodes subscription links"
+          awk '/^(vless|vmess|trojan|ss|hysteria2):\/\// { print }' "site/subscriptions/${SUBSCRIPTION_TOKEN}.txt"
+          echo
+        } > runtime/client-links.txt
+        chmod 600 runtime/client-links.txt 2>/dev/null || true
+      fi
       echo "Subscription links refreshed from 3X-UI all-nodes clients."
       return 0
     fi
