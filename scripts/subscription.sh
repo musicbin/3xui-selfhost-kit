@@ -57,7 +57,7 @@ normalize_aliases() {
 
 ensure_xui_api_env() {
   local aliases token out
-  XUI_API_BASE="${XUI_API_BASE:-http://127.0.0.1:${PANEL_PORT}/${WEB_BASE_PATH#/}}"
+  XUI_API_BASE="http://127.0.0.1:${PANEL_PORT}/${WEB_BASE_PATH#/}"
   set_env_var XUI_API_BASE "$XUI_API_BASE"
 
   if [ -z "$SERVER_ALIASES" ]; then
