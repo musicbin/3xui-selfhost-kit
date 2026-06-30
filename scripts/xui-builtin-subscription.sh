@@ -24,6 +24,7 @@ XUI_BUILTIN_JSON_ENABLE="${XUI_BUILTIN_JSON_ENABLE:-0}"
 XUI_BUILTIN_CLASH_ENABLE="${XUI_BUILTIN_CLASH_ENABLE:-0}"
 XUI_BUILTIN_RESTART="${XUI_BUILTIN_RESTART:-1}"
 XUI_BUILTIN_RESTART_DELAY="${XUI_BUILTIN_RESTART_DELAY:-15}"
+DEFAULT_SUB_ID="${DEFAULT_SUB_ID:-}"
 
 log() { printf '[xui-sub] %s\n' "$*"; }
 
@@ -143,6 +144,7 @@ write_builtin_client_links() {
     --arg subUri "$sub_uri" \
     --arg jsonUri "$json_uri" \
     --arg clashUri "$clash_uri" \
+    --arg defaultSubId "$DEFAULT_SUB_ID" \
     --argjson jsonEnable "$(truthy "$XUI_BUILTIN_JSON_ENABLE")" \
     --argjson clashEnable "$(truthy "$XUI_BUILTIN_CLASH_ENABLE")" '
     def settings_obj:
@@ -151,11 +153,26 @@ write_builtin_client_links() {
       .obj[]? as $inbound
       | ($inbound | settings_obj | .clients // [])[]?
       | select((.subId // "") != "")
-      | "client: \(.email // "unknown")",
-        "  sub: \($subUri)\(.subId)",
-        (if $jsonEnable then "  json: \($jsonUri)\(.subId)" else empty end),
-        (if $clashEnable then "  clash: \($clashUri)\(.subId)" else empty end)
-    ] | .[]
+      | {email: (.email // "unknown"), subId: .subId}
+    ]
+    | sort_by(.subId, .email)
+    | group_by(.subId)[]
+    | . as $clients
+    | ($clients[0].subId) as $subId
+    | (
+        if $defaultSubId != "" and $subId == $defaultSubId then
+          "default-all-nodes (\($clients | length) nodes)"
+        elif ($clients | length) > 1 then
+          "shared-subscription (\($clients | length) nodes)"
+        else
+          $clients[0].email
+        end
+      ) as $label
+    | "client: \($label)",
+      (if ($clients | length) > 1 then "  includes: \($clients | map(.email) | join(", "))" else empty end),
+      "  sub: \($subUri)\($subId)",
+      (if $jsonEnable then "  json: \($jsonUri)\($subId)" else empty end),
+      (if $clashEnable then "  clash: \($clashUri)\($subId)" else empty end)
   ' runtime/xui-builtin-inbounds.json > runtime/xui-builtin-sub-links.txt
 
   if [ ! -s runtime/xui-builtin-sub-links.txt ]; then

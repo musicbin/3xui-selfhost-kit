@@ -23,7 +23,7 @@ curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/ins
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh \
-  | sudo env CONFIG_WIZARD=0 'DOMAIN_NAMES=heubhkldhuu.shop,www.heubhkldhuu.shop' MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
+  | sudo env CONFIG_WIZARD=0 'DOMAIN_NAMES=heubhkldhuu.shop,www.heubhkldhuu.shop,newctshpm.icu,www.newctshpm.icu,safkdsajfkajfasfdyidsf.newctshpm.icu' MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
 ```
 
 多个域名、多个前缀都写进 `DOMAIN_NAMES`，例如：
@@ -214,7 +214,7 @@ https://your.domain/sub/config/3.5.yaml
 
 也就是你的订阅转换会继续按这份 `3.5.yaml` 的分流规则生成配置。
 
-最推荐给 Clash 使用的是这个渲染后的订阅链接，它会读取当前节点，再把节点参数填入 `3.5.yaml` 的 `proxies:`，并保留原来的节点名称和下面所有分流规则：
+最推荐给 Clash 使用的是这个渲染后的订阅链接，它会读取当前节点，再把节点参数填入 `3.5.yaml` 的 `proxies:`，并保留原来的节点名称和下面所有分流规则。3X-UI 官方面板只显示实际监听入站，不会为每个域名重复创建占用端口的入站；这里的渲染订阅会按 `DOMAIN_NAMES` / `SERVER_ALIASES` 展开每个域名的节点，如果节点数量超过模板里的默认名称，会自动追加 `@域名` 并同步写入自动选择、故障转移、负载均衡等分组：
 
 ```text
 https://your.domain/subconfig-api/render/clash?token=<token>
@@ -326,9 +326,9 @@ sudo ./scripts/manage.sh refresh-links
 
 ## 3X-UI 内置订阅路径
 
-3X-UI 官方内置订阅的有效格式是“随机前缀 + 客户端 subId”。例如 `/xui-sub-xxxx/<subId>` 才是可用订阅；只打开 `/xui-sub-xxxx/` 没有客户端上下文，官方服务会返回 404。
+3X-UI 官方内置订阅的有效格式是“随机前缀 + subId”。例如 `/xui-sub-xxxx/<subId>` 才是可用订阅；只打开 `/xui-sub-xxxx/` 没有客户端上下文，官方服务会返回 404。
 
-本项目会把基础路径自动跳转到 `/sub/`，并在 `x-ui` 命令行和 `runtime/xui-builtin-sub-links.txt` 里显示真实客户端链接。
+本项目会把基础路径自动跳转到 `/sub/`，并让默认托管节点共享同一个 `DEFAULT_SUB_ID`。因此 `runtime/xui-builtin-sub-links.txt` 里的 `default-all-nodes` 链接会包含默认 VLESS REALITY、Trojan WS TLS、Shadowsocks 2022 等全部默认客户端；单独手动创建的客户端仍会按自己的 `subId` 单独显示。
 
 ## 常用命令
 

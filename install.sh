@@ -475,6 +475,7 @@ REALITY_SERVER_NAMES=${REALITY_SERVER_NAMES:-www.cloudflare.com,cloudflare.com}
 REALITY_SPIDER_X=${REALITY_SPIDER_X:-/}
 
 ENABLE_PRESETS=${ENABLE_PRESETS:-1}
+DEFAULT_SUB_ID=${DEFAULT_SUB_ID:-$(random_hex 8)}
 ENABLE_HYSTERIA=${ENABLE_HYSTERIA:-0}
 ENABLE_TROJAN=${ENABLE_TROJAN:-0}
 ENABLE_SHADOWSOCKS=${ENABLE_SHADOWSOCKS:-1}
@@ -720,6 +721,8 @@ write_install_summary() {
 12) 3X-UI built-in subscription
   Listen:
     ${XUI_BUILTIN_SUB_LISTEN:-127.0.0.1}:${XUI_BUILTIN_SUB_PORT:-2096}
+  Default managed nodes subId:
+    ${DEFAULT_SUB_ID:-not generated yet}
   Reverse proxy URI:
     $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s%s' "${SERVER_ADDR:-your-server}" "${XUI_BUILTIN_SUB_PATH:-/xui-sub/}" || printf 'local-only until HTTPS is enabled')
   JSON URI:

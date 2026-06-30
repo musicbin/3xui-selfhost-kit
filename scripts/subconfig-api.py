@@ -457,6 +457,110 @@ def placeholder_names(config_text):
     return names
 
 
+def link_alias(link):
+    parsed = urlparse(link)
+    fragment = unquote(parsed.fragment or "")
+    if "@" in fragment:
+        alias = fragment.rsplit("@", 1)[1].strip()
+        if alias:
+            return alias
+    return parsed.hostname or ""
+
+
+def unique_name(name, used):
+    base = str(name).strip() or "node"
+    candidate = base
+    counter = 2
+    while candidate in used:
+        candidate = f"{base}-{counter}"
+        counter += 1
+    used.add(candidate)
+    return candidate
+
+
+def rendered_node_names(links, names):
+    rendered = []
+    used = set()
+    target_count = max(len(links), len(names)) if names else len(links)
+    for idx in range(target_count):
+        link = links[idx % len(links)]
+        if names:
+            base = names[idx % len(names)]
+            if idx < len(names):
+                candidate = base
+            else:
+                alias = link_alias(link)
+                candidate = f"{base}@{alias}" if alias else f"{base}-{idx + 1}"
+        else:
+            parsed = urlparse(link)
+            candidate = link_name(parsed, f"{parsed.scheme or 'node'}-{idx + 1}")
+        rendered.append(unique_name(candidate, used))
+    return rendered
+
+
+def proxy_group_expansions(base_names, rendered_names):
+    expansions = {name: [] for name in base_names}
+    if not base_names:
+        return expansions
+    for idx, name in enumerate(rendered_names):
+        base = base_names[idx % len(base_names)]
+        expansions.setdefault(base, []).append(name)
+    return expansions
+
+
+def strip_yaml_scalar(value):
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        return value[1:-1]
+    return value
+
+
+def expand_proxy_group_references(config_text, expansions):
+    if not expansions:
+        return config_text
+
+    out = []
+    in_groups = False
+    in_group = False
+    group_seen = set()
+
+    for line in config_text.splitlines():
+        if re.match(r"^proxy-groups:\s*$", line):
+            in_groups = True
+            in_group = False
+            group_seen = set()
+            out.append(line)
+            continue
+
+        if in_groups and re.match(r"^[A-Za-z0-9_-][^:]*:\s*", line):
+            in_groups = False
+            in_group = False
+            group_seen = set()
+
+        if in_groups and re.match(r"^\s{2}-\s+name:\s*", line):
+            in_group = True
+            group_seen = set()
+            out.append(line)
+            continue
+
+        if in_groups and in_group:
+            match = re.match(r"^(\s+-\s+)(.+?)\s*$", line)
+            if match:
+                prefix, value = match.groups()
+                key = strip_yaml_scalar(value)
+                if key in expansions:
+                    for expanded in expansions[key]:
+                        if expanded in group_seen:
+                            continue
+                        group_seen.add(expanded)
+                        out.append(prefix + expanded)
+                    continue
+
+        out.append(line)
+
+    return "\n".join(out) + "\n"
+
+
 def replace_proxies_block(config_text, proxy_lines):
     lines = config_text.splitlines()
     start = None
@@ -477,24 +581,25 @@ def replace_proxies_block(config_text, proxy_lines):
 
 
 def render_clash_config(config_text, links):
-    nodes = []
+    parsed_links = []
     for link in links:
         node = parse_node(link)
         if node:
-            nodes.append(node)
-    if not nodes:
+            parsed_links.append((link, node))
+    if not parsed_links:
         raise ValueError("No supported nodes were found.")
 
     names = placeholder_names(config_text)
+    rendered_names = rendered_node_names([link for link, _ in parsed_links], names)
     proxy_lines = []
-    if names:
-        for idx, name in enumerate(names):
-            node = list(nodes[idx % len(nodes)])
-            node[0] = f"name: {q(name)}"
-            proxy_lines.append("  - {" + ", ".join(node) + "}")
-    else:
-        proxy_lines = ["  - {" + ", ".join(node) + "}" for node in nodes]
-    return replace_proxies_block(config_text, proxy_lines)
+    for idx, name in enumerate(rendered_names):
+        _, node = parsed_links[idx % len(parsed_links)]
+        node = list(node)
+        node[0] = f"name: {q(name)}"
+        proxy_lines.append("  - {" + ", ".join(node) + "}")
+
+    rendered = replace_proxies_block(config_text, proxy_lines)
+    return expand_proxy_group_references(rendered, proxy_group_expansions(names, rendered_names))
 
 
 def main():

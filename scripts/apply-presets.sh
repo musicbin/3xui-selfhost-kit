@@ -15,7 +15,7 @@ OVERRIDE_KEYS=(
   DOKODEMO_NETWORK DOKODEMO_FOLLOW_REDIRECT DOKODEMO_TPROXY
   CHAIN_ENABLED CHAIN_MODE CHAIN_TYPE CHAIN_ADDRESS CHAIN_PORT CHAIN_USER CHAIN_PASS
   CHAIN_SERVER_NAME CHAIN_ALLOW_INSECURE
-  PRESET_CLIENT_SUFFIX RECREATE_MANAGED_INBOUNDS
+  PRESET_CLIENT_SUFFIX DEFAULT_SUB_ID RECREATE_MANAGED_INBOUNDS
 )
 
 for key in "${OVERRIDE_KEYS[@]}"; do
@@ -80,7 +80,15 @@ ensure_preset_client_suffix() {
   fi
 }
 
+ensure_default_sub_id() {
+  if [ -z "${DEFAULT_SUB_ID:-}" ]; then
+    DEFAULT_SUB_ID="$(rand_hex 8)"
+    set_env_var DEFAULT_SUB_ID "$DEFAULT_SUB_ID"
+  fi
+}
+
 ensure_preset_client_suffix
+ensure_default_sub_id
 
 new_uuid() {
   if [ -r /proc/sys/kernel/random/uuid ]; then
@@ -212,7 +220,7 @@ write_vless_reality() {
   public_key="$(printf '%s' "$keypair" | jq -r '.obj.publicKey')"
   uuid="$(new_uuid)"
   short_id="$(rand_hex 8)"
-  sub_id="$(rand_hex 8)"
+  sub_id="$DEFAULT_SUB_ID"
   server_names_json="$(csv_to_json_array "${REALITY_SERVER_NAMES:-www.cloudflare.com}")"
   sni="$(first_csv "${REALITY_SERVER_NAMES:-www.cloudflare.com}")"
   file="runtime/vless-reality.json"
@@ -327,7 +335,7 @@ write_hysteria2_optional() {
 
   remark="auto-hysteria2-${HYSTERIA_PORT:-8443}"
   auth="$(rand_b64 24)"
-  sub_id="$(rand_hex 8)"
+  sub_id="$DEFAULT_SUB_ID"
   file="runtime/hysteria2.json"
 
   jq -n \
@@ -435,7 +443,7 @@ write_trojan_optional() {
 
   remark="auto-trojan-ws-tls-${TROJAN_PORT:-9443}"
   password="$(rand_b64 24)"
-  sub_id="$(rand_hex 8)"
+  sub_id="$DEFAULT_SUB_ID"
   file="runtime/trojan-ws-tls.json"
 
   jq -n \
@@ -527,7 +535,7 @@ write_shadowsocks_optional() {
   server_password="$(rand_b64 32)"
   client_password="$(rand_b64 32)"
   ss_userinfo="$(printf '%s' "2022-blake3-aes-256-gcm:${server_password}:${client_password}" | b64_url_no_pad)"
-  sub_id="$(rand_hex 8)"
+  sub_id="$DEFAULT_SUB_ID"
   file="runtime/shadowsocks-2022.json"
 
   jq -n \
@@ -757,6 +765,55 @@ apply_chain_optional() {
   echo "Chain outbound added: $tag"
 }
 
+sync_default_subscription_id() {
+  [ -n "${DEFAULT_SUB_ID:-}" ] || return 0
+
+  local resp updates payload id file
+  resp="$(api_get "/panel/api/inbounds/list" 2>/dev/null || true)"
+  [ -n "$resp" ] || return 0
+  printf '%s\n' "$resp" > runtime/inbounds-for-default-subid-sync.json
+
+  updates="$(
+    jq -c --arg subId "$DEFAULT_SUB_ID" '
+      def obj:
+        if type == "string" then (fromjson? // {}) else (. // {}) end;
+      def managed_client:
+        ((.email // "") | test("^me-(vless-reality|hysteria2|trojan|shadowsocks)-"));
+      .obj[]? as $inbound
+      | ($inbound.settings | obj) as $settings
+      | ($settings.clients // []) as $clients
+      | select(($clients | any(managed_client and ((.subId // "") != $subId))))
+      | {
+          id: $inbound.id,
+          enable: ($inbound.enable // true),
+          remark: ($inbound.remark // ""),
+          listen: ($inbound.listen // ""),
+          port: ($inbound.port // 0),
+          shareAddr: ($inbound.shareAddr // ""),
+          shareAddrStrategy: ($inbound.shareAddrStrategy // "listen"),
+          protocol: ($inbound.protocol // ""),
+          expiryTime: ($inbound.expiryTime // 0),
+          total: ($inbound.total // 0),
+          trafficReset: ($inbound.trafficReset // "never"),
+          settings: ($settings | .clients = (($settings.clients // []) | map(if managed_client then .subId = $subId else . end))),
+          streamSettings: ($inbound.streamSettings | obj),
+          sniffing: ($inbound.sniffing | obj)
+        }
+    ' runtime/inbounds-for-default-subid-sync.json 2>/dev/null || true
+  )"
+
+  [ -n "$updates" ] || return 0
+  while IFS= read -r payload; do
+    [ -n "$payload" ] || continue
+    id="$(printf '%s' "$payload" | jq -r '.id // empty')"
+    [ -n "$id" ] || continue
+    file="runtime/inbound-default-subid-${id}.json"
+    printf '%s\n' "$payload" > "$file"
+    echo "Syncing managed client subId to DEFAULT_SUB_ID for inbound ${id}"
+    api_post_json "/panel/api/inbounds/update/${id}" "$file" | jq . || true
+  done <<< "$updates"
+}
+
 write_panel_links() {
   local links_file="runtime/panel-all-links.txt"
   local resp emails email encoded client_resp
@@ -787,6 +844,7 @@ write_trojan_optional
 write_shadowsocks_optional
 write_dokodemo_optional
 apply_chain_optional
+sync_default_subscription_id
 
 write_panel_links
 chmod 600 runtime/panel-all-links.txt 2>/dev/null || true
